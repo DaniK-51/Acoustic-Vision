@@ -1,0 +1,354 @@
+# Acoustic-Vision — Software Architecture
+
+Room acoustics simulator: geometric acoustics (ISM / ray tracing) → impulse response + metrics (RT60, EDT, early reflections). C++ core, REST+WS API, Electron GUI in phase 2.
+
+**Stage**: architecture only — no implementation yet.  
+**Target OS**: Windows (MSVC). **v1 language**: C++20. **Delivery**: core first, GUI later.
+
+Companion docs: [`docs/idea.md`](docs/idea.md) · [`docs/engines.md`](docs/engines.md) · [`AGENTS.md`](AGENTS.md)
+
+---
+
+## 1. Monorepo layout
+
+```
+Acoustic-Vision/
+├── CMakeLists.txt                 # superbuild, options: AV_BUILD_API, AV_BUILD_TESTS
+├── CMakePresets.json              # windows-msvc-x64-debug/release
+├── vcpkg.json                     # manifest deps
+├── ARCHITECTURE.md                # this document
+├── README.md                      # product overview
+├── docs/                          # idea.md, engines.md, …
+├── schemas/                       # JSON Schemas, single source of truth for API + GUI
+│   ├── scenario.schema.json       # present
+│   ├── engine-descriptor.schema.json  # present
+│   ├── material.schema.json       # planned (P0)
+│   ├── simulation-result.schema.json  # planned (P0)
+│   └── job.schema.json            # planned (P1)
+├── cmake/                         # helpers, warnings, sanitizers
+├── engines/                       # calculation methods + _template (see docs/engines.md)
+│   ├── sabine_eyring/
+│   ├── image_source/
+│   └── _template/
+├── libs/
+│   ├── core/                      # av_core — pure computation, no HTTP, no file IO deps
+│   │   ├── include/av/
+│   │   │   ├── geometry/          # Vec3, AABB, Mesh, Surface, Room, Bvh
+│   │   │   ├── materials/         # Material, AbsorptionTable, BandFreqs
+│   │   │   ├── acoustics/         # Engine API: IEngine, Descriptor, Registry, CancelToken
+│   │   │   ├── metrics/           # Rt60, Edt, EarlyReflections, IrBuffer
+│   │   │   ├── scenario/          # Scenario, Source, Receiver, SimParams
+│   │   │   └── units.hpp
+│   │   └── src/...
+│   ├── io/                        # av_io — OBJ/glTF import, WAV/CSV export, scenario JSON
+│   │   ├── include/av/io/
+│   │   └── src/
+│   └── sim/                       # av_sim — job queue, progress, cancellation
+│       ├── include/av/sim/
+│       └── src/
+├── apps/
+│   ├── cli/                       # av-cli: run scenario JSON headless
+│   └── api/                       # av-api: REST + WebSocket server (Crow)
+├── tests/
+│   ├── unit/                      # GoogleTest, per-module
+│   ├── integration/               # API round-trips (spawn server or in-process)
+│   └── fixtures/                  # analytic rooms, golden IR/metrics, sample OBJ/glTF
+├── tools/                         # scripts (schema validation, golden regen)
+└── gui/                           # P3 placeholder — empty, README stub only
+    └── README.md
+```
+
+**Dependency direction** (strict, enforced by CMake `target_link_libraries`):
+`av_core` ← `av_io` ← `av_sim` ← (`av-cli`, `av-api`). GUI (P3) talks only to `av-api` over HTTP/WS — never links the core.
+
+---
+
+## 2. C++ core modules
+
+### geometry
+- `Vec3`, `Aabb`, `Triangle`, `Mesh` (indexed, normals optional; compute face normals).
+- `Surface`: triangle + material id + outward normal convention (document: normals point *into* the room / toward the air).
+- `Room`: collection of surfaces + optional axis-aligned bounds. Two specializations behind one type:
+  - `RectRoom(w,h,d, materials per face)` — exact, fast, IMS-native.
+  - `MeshRoom(Mesh)` — arbitrary; validated for watertightness (warning, not hard fail).
+- `Bvh`: AABB tree over triangles. Built lazily; used by ray tracing and mesh visibility queries. IMS-on-rect does not need it.
+
+### materials
+- `Material { id, name, AbsorptionTable, scattering }`.
+- `AbsorptionTable`: 6 or 8 octave bands (default ISO: 125, 250, 500, 1k, 2k, 4k Hz; extendable to 63 Hz / 8 kHz). Values α ∈ [0,1] per band. Linear interp only for display/export — simulation uses per-band.
+- Scattering coefficient stored now (used by ray tracing later); ignored by v1 IMS.
+
+### acoustics engines (Engine API)
+Extensibility goal: **new method = one module + registration** — no edits to API, GUI, or other engines. Full guide: `docs/engines.md`.
+
+```cpp
+struct Capabilities {
+  bool supportsRect = true;
+  bool supportsMesh = false;
+  bool supportsRayPaths = false;
+  bool supportsBands = true;
+  int  maxOrder = 0;           // 0 = N/A
+};
+
+struct EngineDescriptor {
+  std::string id;              // "image-source"
+  std::string name;            // "Image Source Method"
+  std::string version;
+  Capabilities caps;
+  nlohmann::json paramsSchema; // JSON Schema → GUI auto-form
+};
+
+struct ValidateResult {
+  bool ok = true;
+  std::vector<std::string> errors;
+  std::vector<std::string> warnings;
+};
+
+struct Progress { double fraction; std::string stage; };
+using ProgressFn = std::function<void(const Progress&)>;
+
+class CancelToken {
+public:
+  void cancel();
+  bool cancelled() const;
+};
+
+class IEngine {
+public:
+  virtual ~IEngine() = default;
+  virtual EngineDescriptor descriptor() const = 0;
+  virtual ValidateResult validate(const Scenario&) const = 0;
+  virtual Result run(const Scenario&, const SimParams&,
+                     const CancelToken&, ProgressFn) = 0;
+};
+```
+
+Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory by id + descriptor list).
+
+| Engine | Role (v1+) | Notes |
+|---|---|---|
+| `sabine-eyring` | analytic RT60 from V, S, ᾱ(f) | no IR; metrics only; instant |
+| `image-source` | IR for **rectangular** rooms, order N | classical mirror-source; per-band IR |
+| `ray-tracing` | IR + ray paths for **mesh** rooms | P2; same `IEngine` |
+| `hybrid` | ISM early + RT late | P2; full IR on mesh |
+
+`EngineRegistry` selects by `simParams.engine` + room type; API returns `400` if engine/capability mismatch (e.g. IMS + mesh).
+
+**Plugin model (A → B):**
+- **P0–P2 (A):** compile-time registry + `REGISTER_ENGINE`. Enough for in-repo methods.
+- **P2.5+ (B):** optional dynamic `.dll` via stable C ABI `av_engine_api_v1` (`LoadLibrary`). Same descriptor/Result contract — no redesign.
+- Adding a method: `engines/<name>/` → implement `IEngine` → register → optional golden test. API `/v1/engines` and GUI pick it up automatically.
+
+**ISM correctness notes (write tests first; conventions frozen in `docs/engines.md` §5):**
+- Path length → delay `t = r / c`, amplitude `∝ 1/r` (optional exp air absorption later).
+- α is **energy** absorption: energy reflection `(1-α)`, **amplitude** reflection `√(1-α)` per bounce per band; `energy = amplitude²`.
+- Sign convention for odd reflections optional (`k = -1` toggle); default energy-only (no polarity).
+- Enumerate images up to order N on a 3D integer lattice (n₁,n₂,n₃), filter by bounce count.
+- CancelToken must be polled in engine inner loops (required from P0).
+
+### metrics
+- `IrBuffer`: multi-channel (one per receiver), per-band or broadband; `sampleRate`, `duration`.
+- `RT60`: Schroeder backward integration + linear fit of −5…−35 dB (T30); also report Sabine & Eyring analytic.
+- `EDT`: 0 → −10 dB fit.
+- `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, (optional) path polyline for GUI.
+- `IrExport`: WAV (float32 PCM) + CSV (time, amplitude per channel/band).
+
+### IO
+- Import: **OBJ** (tinyobjloader), **glTF/GLB** (tinygltf) → `Mesh` + material slots. Scale/unit flag (`meters` default, `mm/cm/in` convert on import).
+- Export: scenario JSON (nlohmann), IR WAV/CSV, metrics JSON.
+- Scenario (de)serialization ↔ `schemas/*.schema.json` — validate in tests and at API boundary.
+
+### job / orchestration (`av_sim`)
+- `JobManager`: thread pool (N = hw−1), `JobId`, states `queued → running → succeeded | failed | cancelled`.
+- Snapshot `Scenario` at submit time (no shared mutable state).
+- `ProgressFn` throttled to ≤10 Hz → WS broadcasts.
+- Cancellation: atomic flag checked in engine inner loops; engines must poll.
+- Sync mode: `runNow(scenario)` for CLI and tests (no queue).
+
+---
+
+## 3. API design (REST + WebSocket)
+
+Base: `http://localhost:8787/v1` · WS: `ws://localhost:8787/v1/events` · JSON only · `Content-Type: application/json`.
+
+### Resource model
+`material` → referenced by `room` surfaces · `room` · `source` · `receiver` · belong to a `scenario` · `simulation` runs a scenario · `job` wraps an async simulation.
+
+In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later concern; document IDs as UUIDv4.
+
+### REST endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/v1/health` | liveness, version |
+| GET | `/v1/engines` | `EngineDescriptor` list (id, caps, paramsSchema) |
+| GET/POST | `/v1/materials` | list / create material |
+| GET/PATCH/DELETE | `/v1/materials/{id}` | read / update / delete |
+| GET/POST | `/v1/rooms` | list / create room (inline mesh or import ref) |
+| GET/PATCH/DELETE | `/v1/rooms/{id}` | read / update / delete |
+| POST | `/v1/rooms/import` | multipart: OBJ/glTF (+ options: scale, unit, name) → room |
+| GET/POST | `/v1/sources` | list / create source (pos, optional directivity) |
+| GET/POST | `/v1/receivers` | list / create receiver (pos) |
+| GET/POST | `/v1/scenarios` | list / create full scenario (refs + params) |
+| GET/PATCH/DELETE | `/v1/scenarios/{id}` | read / update / delete |
+| GET | `/v1/scenarios/{id}/validate` | dry-run: mesh/material/engine checks |
+| POST | `/v1/simulations` | run scenario → `{jobId}` (async) or `?sync=1` → result |
+| GET | `/v1/simulations/{id}` | result summary + links to artifacts |
+| GET | `/v1/simulations/{id}/ir` | IR artifact (WAV binary or JSON samples `?format=json`) |
+| GET | `/v1/simulations/{id}/metrics` | RT60/EDT/early-reflections JSON |
+| GET | `/v1/jobs/{id}` | job status/progress/error |
+| POST | `/v1/jobs/{id}/cancel` | request cancellation |
+| GET | `/v1/bands` | frequency band convention in use |
+
+Errors: RFC7807-ish `{ "type", "title", "status", "detail", "fields"? }`.
+
+### WebSocket `/v1/events`
+Client sends: `{ "op": "subscribe", "jobId": "..." }` or `"jobId": "*"`.
+Server events (JSON):
+
+| event | payload |
+|---|---|
+| `job.progress` | `jobId`, `fraction` 0..1, `stage` |
+| `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
+| `job.failed` | `jobId`, `error` |
+| `job.cancelled` | `jobId` |
+| `simulation.reflection` | optional P3+: batched ray/early-reflection paths for live 3D view |
+
+REST polling (`GET /jobs/{id}`) is the fallback; WS is progressive enhancement.
+
+**Extensibility for 3D GUI**: every result includes `paths` hook (`/simulations/{id}/paths?maxReflections=K` → list of polylines world-space). Empty in IMS v1 unless early-reflection enumeration is on (`simParams.capturePaths=true`).
+
+---
+
+## 4. Data model (scenario JSON sketch)
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "demo-room",
+  "room": {
+    "type": "rect",                       // "rect" | "mesh"
+    "size": { "w": 6.0, "h": 2.8, "d": 4.5 },
+    "faces": { "floor": "mat-carpet", "ceiling": "mat-plaster",
+               "x+": "mat-brick", "x-": "mat-brick", "z+": "mat-glass", "z-": "mat-brick" },
+    "mesh": { "uri": "file:///.../room.glb", "unit": "m", "scale": 1.0,
+              "materialOverrides": { "Wall_A": "mat-brick" } }
+  },
+  "materials": [{
+    "id": "mat-carpet", "name": "Carpet on concrete",
+    "bandsHz": [250, 500, 1000, 2000, 4000],
+    "absorption": [0.10, 0.25, 0.35, 0.40, 0.50],
+    "scattering": 0.1
+  }],
+  "sources": [{ "id": "src-1", "position": [1.2, 1.5, 1.0], "powerDb": 80.0 }],
+  "receivers": [{ "id": "rcv-1", "position": [4.0, 1.5, 3.0] }],
+  "params": {
+    "engine": "image-source",            // "sabine-eyring" | "image-source" | "ray-tracing" | "hybrid"
+    "maxReflectionOrder": 12,
+    "sampleRate": 48000,
+    "durationSec": 1.5,
+    "bandsHz": [250, 500, 1000, 2000, 4000],
+    "speedOfSound": 343.0,
+    "capturePaths": true,
+    "airAbsorption": false
+  }
+}
+```
+
+Result sketch: `{ simulationId, jobId, metrics: { rt60: { "500": { schroederT30, sabine, eyring }, ... }, edt: {...}, earlyReflections: [{ t, amp, order, path? }] }, ir: { sampleRate, durationSec, channels, urls } }`.
+
+Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; API validates against schema before enqueue.
+
+---
+
+## 5. Tech stack (coherent, Windows-first)
+
+| Concern | Choice | Why |
+|---|---|---|
+| Build | **CMake ≥ 3.24** + `CMakePresets.json` | MSVC/VS2022 native, Ninja optional |
+| Packages | **vcpkg manifest** (`vcpkg.json`) | official Windows story, reproducible |
+| Lang | **C++20** | designated init, `span`, `ranges` sparingly |
+| Linear algebra | **Eigen 3.4** (header-only) | vectors/transforms; no heavy dep |
+| JSON | **nlohmann/json** | ubiquitous, easy |
+| HTTP + WS | **Crow** | one lib, REST + WebSocket, Asio-based, simple routing |
+| OBJ | **tinyobjloader** | single-purpose, widely used |
+| glTF | **tinygltf** (+ stb) | covers GLB, materials |
+| WAV | **dr_wav** (or 50-line custom float32 writer) | trivial IR export |
+| CLI | **CLI11** | clean, header-friendly |
+| Tests | **GoogleTest** | industry default |
+| Schema check | **nlohmann-json-schema-validator** (optional P1) | validate at API edge |
+| GUI (P3) | **Electron + three.js** (or React Three Fiber) | not a C++ concern |
+
+Avoid Boost.Beast (build weight) and FDTD/GNU Octave-style deps. No GPU libs in v1.
+
+---
+
+## 6. Build & test strategy
+
+```
+cmake --preset windows-msvc-x64-release
+cmake --build --preset windows-msvc-x64-release
+ctest --preset windows-msvc-x64-release
+```
+
+- **Warnings**: `/W4 /permissive- /WX` in CI-config; clang-tidy optional later.
+- **Unit (must-pass gates)**
+  - RT60: Sabine `T = 0.161 V / (S ᾱ)` and Eyring against hand-computed rooms; empty-room vs highly-absorbing bounds.
+  - ISM: single-bounce delay/amplitude analytic check; image count for order N; rectangular shoebox vs Sabine trend (RT60 from IR ≈ analytic within tolerance); reciprocity source↔receiver.
+  - Metrics: synthetic IR with known exponential decay → RT60 recovered; EDT on synthetic early-late split.
+  - IO: OBJ/glTF round-trip vertex counts; scenario JSON golden files.
+- **Integration**: spin `av-api` in-process (`AV_BUILD_API`) or subprocess; REST CRUD + one full simulation job + WS `job.succeeded` receipt.
+- **Golden tests**: `tests/fixtures/golden/*.json` regenerated only via `tools/regen_goldens` and reviewed.
+- **CI (later)**: GitHub Actions `windows-latest` matrix, ctest + schema validation.
+
+---
+
+## 7. Phased roadmap
+
+| Phase | Scope | Exit criteria |
+|---|---|---|
+| **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV/CSV export, `av-cli` | unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
+| **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store, schema validation | integration tests green; Electron-ready contract frozen (`schemas/`) |
+| **P2** Import + mesh rooms | OBJ/glTF import, MeshRoom validation, BVH, `RayTracingEngine` (early order / hybrid IMS-direct+RT), paths export | glTF room runs; ray-IR metrics sane vs shoebox benchmark |
+| **P3** Electron GUI + 3D editor | `gui/` Electron app: viewport (three.js), room primitives, gizmos for source/receiver, material palette, import UI, live progress via WS, IR/metric charts | edit → simulate → visualize without leaving app |
+
+GUI outline only (P3): main process talks REST; renderer subscribes WS; room editor = box/extrude primitives + OBJ/glTF upload; no custom mesh sculpting in v1.5.
+
+---
+
+## 8. Risks, open questions, non-goals
+
+**Risks**
+- ISM correctness is easy to get subtly wrong (1/r vs 1/r², energy vs pressure α) → golden tests + documented convention first.
+- Arbitrary meshes break pure IMS (occlusion, non-convex) → engine capability flags + clear 400s; ray tracing is the real path (P2).
+- Open/non-manifold meshes from DCC tools → import validator (non-fatal warnings, optional repair later).
+- Crow/Asio + MSVC quirks (Winsock, UTF-8 paths) → pin versions via vcpkg, CI on windows-latest early in P1.
+- Long simulations block thread pool → job timeouts + cancellation polling mandatory before P1 ships.
+- Frequency-band mismatch between materials and metrics → one global band table in scenario, validated.
+
+**Open questions**
+- Which RT60 variant is "the" output: T30 Schroeder only, or always paired with Sabine/Eyring? (Recommend: all three, keyed by band.)
+- Energy vs pressure IR (sign of reflections)? Default pressure-less energy envelope for metrics; optional signed IR flag.
+- Multi-receiver / multi-source in one run: v1 yes (N×M channels) or sequential? (Recommend: yes, Cartesian product, channel naming `srcId:rcvId`.)
+- Units: strictly SI meters; reject other units at API, convert only at import.
+
+**Deliberate non-goals (v1)**
+- No FDTD / wave solvers, no diffraction (beyond scattering placeholder).
+- No real-time audio plugin, no live auralization DSP (IR export only).
+- No HRTF/binaural rendering (receivers are point probes).
+- No multi-room coupling, no outdoors/terrain.
+- No GPU, no distributed compute.
+- No auth/multi-tenant (localhost tool).
+- No GUI implementation in P0–P2 (contract only).
+
+---
+
+## Implementation order (P0 actionable list)
+
+1. CMake superbuild + vcpkg manifest + GoogleTest harness.
+2. `av_core`: `Vec3`, `Room` rect, `Material`/bands, scenario structs + JSON.
+3. `SabineEyringEngine` + metrics from analytic → tests.
+4. `ImageSourceEngine` + `IrBuffer` + RT60/EDT from IR → golden shoebox test.
+5. `av_io`: scenario JSON r/w, WAV/CSV export.
+6. `av-cli` end-to-end.
+7. Freeze `schemas/`; start P1 (`av_sim` jobs, then `av-api`).

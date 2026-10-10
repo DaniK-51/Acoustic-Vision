@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acoustic-vision.local/schemas/scenario.schema.json",
+  "title": "Acoustic-Vision Scenario",
+  "type": "object",
+  "required": ["room", "materials", "params"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "name": { "type": "string" },
+    "room": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["rect", "mesh"] },
+        "size": {
+          "type": "object",
+          "properties": {
+            "w": { "type": "number", "exclusiveMinimum": 0 },
+            "h": { "type": "number", "exclusiveMinimum": 0 },
+            "d": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "faces": {
+          "type": "object",
+          "properties": {
+            "floor": { "type": "string" },
+            "ceiling": { "type": "string" },
+            "x+": { "type": "string" },
+            "x-": { "type": "string" },
+            "z+": { "type": "string" },
+            "z-": { "type": "string" }
+          }
+        },
+        "mesh": {
+          "type": "object",
+          "properties": {
+            "uri": { "type": "string" },
+            "unit": { "enum": ["m", "mm", "cm", "in"] },
+            "scale": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        }
+      }
+    },
+    "materials": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "absorption"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "bandsHz": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 } },
+          "absorption": {
+            "type": "array",
+            "items": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "scattering": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "position"],
+        "properties": {
+          "id": { "type": "string" },
+          "position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          },
+          "powerDb": { "type": "number" }
+        }
+      }
+    },
+    "receivers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "position"],
+        "properties": {
+          "id": { "type": "string" },
+          "position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3
+          }
+        }
+      }
+    },
+    "params": {
+      "type": "object",
+      "required": ["engine"],
+      "properties": {
+        "engine": { "type": "string" },
+        "maxReflectionOrder": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "sampleRate": { "type": "integer", "minimum": 1000 },
+        "durationSec": { "type": "number", "exclusiveMinimum": 0 },
+        "bandsHz": { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 } },
+        "speedOfSound": { "type": "number", "exclusiveMinimum": 0 },
+        "capturePaths": { "type": "boolean" },
+        "airAbsorption": { "type": "boolean" },
+        "signedIr": { "type": "boolean" },
+        "methodParams": { "type": "object" }
+      }
+    }
+  }
+}

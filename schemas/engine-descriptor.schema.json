@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acoustic-vision.local/schemas/engine-descriptor.schema.json",
+  "title": "Acoustic-Vision Engine Descriptor",
+  "type": "object",
+  "required": ["id", "name", "version", "caps"],
+  "properties": {
+    "id": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "caps": {
+      "type": "object",
+      "properties": {
+        "supportsRect": { "type": "boolean" },
+        "supportsMesh": { "type": "boolean" },
+        "supportsRayPaths": { "type": "boolean" },
+        "supportsBands": { "type": "boolean" },
+        "maxOrder": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "paramsSchema": { "type": "object" }
+  }
+}

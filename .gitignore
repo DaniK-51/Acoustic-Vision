@@ -1,0 +1,26 @@
+# OS / editors
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Build (when implementation starts)
+build/
+out/
+cmake-build-*/
+.vs/
+.vscode/
+.idea/
+compile_commands.json
+
+# Deps / packages
+vcpkg_installed/
+_deps/
+node_modules/
+
+# Runtime artifacts
+*.wav
+*.log
+
+# Agent / tooling
+.mimocode/
