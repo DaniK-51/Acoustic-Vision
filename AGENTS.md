@@ -24,24 +24,31 @@
 
 ## Зафиксированные решения (не менять без явного запроса пользователя)
 
-1. **Ядро** — C++20, target OS Windows (MSVC).
-2. **GUI** — Electron + свой мощный 3D-редактор (фаза P3).
-3. **Связь GUI ↔ ядро** — только REST + WebSocket (`/v1`). GUI не линкует C++.
-4. **Ввод геометрии** — свой редактор + импорт OBJ/glTF.
-5. **Порядок поставки** — core first, GUI later.
-6. **Расширяемость методов** — модель **A → B**: compile-time `EngineRegistry` сейчас; dynamic DLL + C ABI (`av_engine_api_v1`) — P2.5, без ломки контракта.
-7. **В P0** — полный Engine API (`IEngine`, descriptor, registry, cancel) + два метода: `sabine-eyring`, `image-source`.
-8. **Единый Result** — любой engine отдаёт metrics / IR / (опц.) paths.
-9. **SI метры** — конвертация единиц только при импорте.
+1. **Продукт** — open-source инструмент акустического анализа помещений (видение: `docs/idea.md`).
+2. **Ядро** — C++20, target OS Windows (MSVC).
+3. **GUI** — Electron + Vue + Three.js (фаза P3); базовый 3D-редактор в v1, полный DCC в конце.
+4. **Связь GUI ↔ ядро** — только REST + WebSocket (`/v1`). GUI не линкует C++.
+5. **Два режима** — Interactive: WS `scene.patch` (дельты movers), статика на бэке; Compute: кнопка «Расчёт», job может идти **часы** (CPU/GPU). Без обещания «1 с на любой алгоритм».
+6. **Источники** — custom (мощность, АЧХ, направленность) + **built-in catalog** «как есть» (качество спеков — вне ответственности); без measurement/mic pipeline.
+7. **Сравнение** — **история запусков (runs)**, не тяжёлый Study/diff в v1.
+8. **Артефакты** — определяет engine (`ir` / `metrics` / `field` / `rays` / `findings`); research подбор методов — отдельный процесс.
+9. **Ввод геометрии** — свой 3D-редактор (базовый в v1, полный DCC в конце) + импорт OBJ/glTF.
+10. **Порядок поставки** — core first, GUI later.
+11. **Расширяемость методов** — модель **A → B**: compile-time `EngineRegistry` сейчас; dynamic DLL + C ABI (`av_engine_api_v1`) — P2.5, без ломки контракта.
+12. **В P0** — полный Engine API (`IEngine`, descriptor, registry, cancel) + два метода: `sabine-eyring`, `image-source`.
+13. **Единый Result** — metrics / IR / field / rays / findings (по caps engine).
+14. **SI метры** — конвертация единиц только при импорте.
 
 ## Чего не делать
 
 - Не начинать реализацию «по умолчанию» — сначала договориться.
 - Не добавлять FDTD/волновое ядро в v1 (это отдельный engine позже).
-- Не тащить auth, multi-tenant, GPU, multi-room в v1.
+- Не тащить measurement/mic/phone pipeline — это **не наша тема**.
+- Не тащить auth, multi-tenant, multi-room в v1.
+- Не обещать «пересчёт всей акустики за 1 с» — interactive = WS-патчи сцены; тяжёлый расчёт — job (часы и GPU допустимы).
 - Не подключать GUI к ядру иначе чем через HTTP/WS.
 - Не менять конвенции ISM молча (см. `docs/engines.md` §5): `t=r/c`, amp `∝ 1/r`, bounce `√(1-α)` / energy `=(1-α)`, energy = amp².
-- Не создавать remote и лишние git-коммиты без просьбы пользователя.
+- Не создавать лишние git-коммиты без просьбы пользователя.
 
 ## Git
 

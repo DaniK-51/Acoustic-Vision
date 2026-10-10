@@ -1,6 +1,8 @@
 # Acoustic-Vision — Software Architecture
 
-Room acoustics simulator: geometric acoustics (ISM / ray tracing) → impulse response + metrics (RT60, EDT, early reflections). C++ core, REST+WS API, Electron GUI in phase 2.
+Open-source room acoustics analysis: 3D scene + sources → geometric acoustics (ISM / ray tracing) → IR, metrics (RT60, EDT), spatial field, reflections. C++ core, REST+WS API, Electron + Vue + Three.js GUI (P3).
+
+**Vision** (voted): 3D scene + sources (custom + catalog «as-is») → multi-algorithm compute runs (may take hours on GPU) with history; interactive editing via WS scene patches (static scene lives on backend). Basic editor first, full DCC later. Artifacts = whatever the engine computes (point / field / rays / IR). No measurement/mic pipeline.
 
 **Stage**: architecture only — no implementation yet.  
 **Target OS**: Windows (MSVC). **v1 language**: C++20. **Delivery**: core first, GUI later.
@@ -78,6 +80,12 @@ Acoustic-Vision/
 - `AbsorptionTable`: 6 or 8 octave bands (default ISO: 125, 250, 500, 1k, 2k, 4k Hz; extendable to 63 Hz / 8 kHz). Values α ∈ [0,1] per band. Linear interp only for display/export — simulation uses per-band.
 - Scattering coefficient stored now (used by ray tracing later); ignored by v1 IMS.
 
+### sources
+- `Source { id, position, orientation, powerDb, spectrum (АЧХ), directivity, catalogRef? }`.
+- **Custom** source defined inline in scenario.
+- **Built-in catalog** (`GET /v1/source-catalog`): real-world devices as fact-based cards (power, frequency response, polar pattern). No measurement pipeline.
+- Catalog is data-only; engines consume the resolved Source model.
+
 ### acoustics engines (Engine API)
 Extensibility goal: **new method = one module + registration** — no edits to API, GUI, or other engines. Full guide: `docs/engines.md`.
 
@@ -152,6 +160,24 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - `EDT`: 0 → −10 dB fit.
 - `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, (optional) path polyline for GUI.
 - `IrExport`: WAV (float32 PCM) + CSV (time, amplitude per channel/band).
+- `SpatialField`: level/energy on a 3D grid (or surfaces) per band — for heat-maps and “where sound is strong”. Progressive/chunked for interactive UX.
+
+### runs (history)
+- A **run** = scenario snapshot + engine + params + result id.
+- v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
+
+### scene store + interactive patches
+- Backend owns the **Scene Store** (full scenario state, `sceneVersion`).
+- Interactive edits use WS deltas, not full recompute:
+  - client → `scene.patch` `{ sceneId, ops: [{op: move, id, position}, …] }`
+  - server → `scene.patched` `{ sceneId, sceneVersion, ops? }`
+- Static geometry/materials uploaded once (REST); only movers stream over WS.
+- Compute runs snapshot the scene at `sceneVersion` for reproducibility.
+
+### artifacts (engine-defined)
+Engines declare which artifact kinds they produce (`EngineDescriptor.artifacts`):
+`ir` · `metrics` · `field` · `rays` · `findings` (optional analysis flags).
+GUI renders only advertised kinds. Long jobs (minutes–hours, GPU/CPU) are first-class: progress, cancel, job timeouts.
 
 ### IO
 - Import: **OBJ** (tinyobjloader), **glTF/GLB** (tinygltf) → `Mesh` + material slots. Scale/unit flag (`meters` default, `mm/cm/in` convert on import).
@@ -187,7 +213,9 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 | GET/POST | `/v1/rooms` | list / create room (inline mesh or import ref) |
 | GET/PATCH/DELETE | `/v1/rooms/{id}` | read / update / delete |
 | POST | `/v1/rooms/import` | multipart: OBJ/glTF (+ options: scale, unit, name) → room |
-| GET/POST | `/v1/sources` | list / create source (pos, optional directivity) |
+| GET/POST | `/v1/sources` | list / create source (pos, orientation, power, АЧХ, directivity) |
+| GET | `/v1/source-catalog` | built-in device catalog (specs as-is, no warranty) |
+| GET | `/v1/runs` | run history for scenes |
 | GET/POST | `/v1/receivers` | list / create receiver (pos) |
 | GET/POST | `/v1/scenarios` | list / create full scenario (refs + params) |
 | GET/PATCH/DELETE | `/v1/scenarios/{id}` | read / update / delete |
@@ -196,9 +224,14 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 | GET | `/v1/simulations/{id}` | result summary + links to artifacts |
 | GET | `/v1/simulations/{id}/ir` | IR artifact (WAV binary or JSON samples `?format=json`) |
 | GET | `/v1/simulations/{id}/metrics` | RT60/EDT/early-reflections JSON |
+| GET | `/v1/simulations/{id}/field` | spatial field grid (progressive chunks) |
 | GET | `/v1/jobs/{id}` | job status/progress/error |
 | POST | `/v1/jobs/{id}/cancel` | request cancellation |
 | GET | `/v1/bands` | frequency band convention in use |
+
+**Two modes:**
+- **Interactive** — WS `scene.patch` / `scene.patched` for mover deltas; backend Scene Store is source of truth. No promise of full acoustic recompute per drag.
+- **Compute** — `POST /simulations` → job (CPU/GPU, minutes–hours OK); WS `job.progress` / `job.succeeded`. Engines may require extra setup (mesh, grid) via `params.methodParams` + `paramsSchema`.
 
 Errors: RFC7807-ish `{ "type", "title", "status", "detail", "fields"? }`.
 
@@ -208,6 +241,8 @@ Server events (JSON):
 
 | event | payload |
 |---|---|
+| `scene.patch` | client→server: delta ops (move/rotate/param) |
+| `scene.patched` | server→client: ack + `sceneVersion` |
 | `job.progress` | `jobId`, `fraction` 0..1, `stage` |
 | `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
 | `job.failed` | `jobId`, `error` |
@@ -277,9 +312,9 @@ Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; API validates
 | CLI | **CLI11** | clean, header-friendly |
 | Tests | **GoogleTest** | industry default |
 | Schema check | **nlohmann-json-schema-validator** (optional P1) | validate at API edge |
-| GUI (P3) | **Electron + three.js** (or React Three Fiber) | not a C++ concern |
+| GUI (P3) | **Electron + Vue + Three.js** | voted stack; not a C++ concern |
 
-Avoid Boost.Beast (build weight) and FDTD/GNU Octave-style deps. No GPU libs in v1.
+Avoid Boost.Beast (build weight) and FDTD/GNU Octave-style deps. P0 engines are CPU; GPU engines are allowed later (job queue is long-run ready).
 
 ---
 
@@ -310,9 +345,10 @@ ctest --preset windows-msvc-x64-release
 | **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV/CSV export, `av-cli` | unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
 | **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store, schema validation | integration tests green; Electron-ready contract frozen (`schemas/`) |
 | **P2** Import + mesh rooms | OBJ/glTF import, MeshRoom validation, BVH, `RayTracingEngine` (early order / hybrid IMS-direct+RT), paths export | glTF room runs; ray-IR metrics sane vs shoebox benchmark |
-| **P3** Electron GUI + 3D editor | `gui/` Electron app: viewport (three.js), room primitives, gizmos for source/receiver, material palette, import UI, live progress via WS, IR/metric charts | edit → simulate → visualize without leaving app |
+| **P3** Electron+Vue+Three.js GUI | Базовый 3D-редактор, gizmos, каталог, `scene.patch`, кнопка «Расчёт», history | drag → WS-дельта; run → job |
+| **P4** Research + catalog | External algorithms as engines, richer source cards | research engine без правок GUI |
 
-GUI outline only (P3): main process talks REST; renderer subscribes WS; room editor = box/extrude primitives + OBJ/glTF upload; no custom mesh sculpting in v1.5.
+GUI outline only (P3): main process talks REST; renderer subscribes WS; room editor = box/extrude primitives + OBJ/glTF upload; source panel = custom + catalog; heat-map field + reflection rays; run history. No custom mesh sculpting in v1.5.
 
 ---
 
@@ -325,6 +361,8 @@ GUI outline only (P3): main process talks REST; renderer subscribes WS; room edi
 - Crow/Asio + MSVC quirks (Winsock, UTF-8 paths) → pin versions via vcpkg, CI on windows-latest early in P1.
 - Long simulations block thread pool → job timeouts + cancellation polling mandatory before P1 ships.
 - Frequency-band mismatch between materials and metrics → one global band table in scenario, validated.
+- Source catalog data quality/legal → specs as-is, explicit disclaimer; custom sources always work offline.
+- Heavy jobs (hours, GPU) → robust job queue, heartbeat, cancel, partial artifacts; interactive path must stay responsive.
 
 **Open questions**
 - Which RT60 variant is "the" output: T30 Schroeder only, or always paired with Sabine/Eyring? (Recommend: all three, keyed by band.)
@@ -333,12 +371,14 @@ GUI outline only (P3): main process talks REST; renderer subscribes WS; room edi
 - Units: strictly SI meters; reject other units at API, convert only at import.
 
 **Deliberate non-goals (v1)**
+- No measurement / mic / phone / calibration pipeline (explicitly out of product scope).
 - No FDTD / wave solvers, no diffraction (beyond scattering placeholder).
-- No real-time audio plugin, no live auralization DSP (IR export only).
+- No 60 FPS live auralization DSP (interactive = scene patches; compute = jobs, hours OK).
 - No HRTF/binaural rendering (receivers are point probes).
 - No multi-room coupling, no outdoors/terrain.
-- No GPU, no distributed compute.
+- No distributed compute (single-node job queue first). GPU engines OK when an engine needs them.
 - No auth/multi-tenant (localhost tool).
+- No heavy Study/diff — run history only.
 - No GUI implementation in P0–P2 (contract only).
 
 ---
