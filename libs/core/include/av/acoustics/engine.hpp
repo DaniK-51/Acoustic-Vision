@@ -29,6 +29,9 @@ struct EngineDescriptor {
   std::string version;
   Capabilities caps;
   nlohmann::json paramsSchema;
+  // Subset of {"ir","metrics","field","rays","findings"}; GUI renders only
+  // advertised kinds (see docs/engines.md section 4).
+  std::vector<std::string> artifacts;
 };
 
 struct ValidateResult {

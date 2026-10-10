@@ -18,6 +18,11 @@
         "maxOrder": { "type": "integer", "minimum": 0 }
       }
     },
-    "paramsSchema": { "type": "object" }
+    "paramsSchema": { "type": "object" },
+    "artifacts": {
+      "type": "array",
+      "items": { "enum": ["ir", "metrics", "field", "rays", "findings"] },
+      "uniqueItems": true
+    }
   }
 }

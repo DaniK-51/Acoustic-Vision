@@ -1,8 +1,11 @@
 add_library(av_core
   src/materials/material.cpp
   src/scenario/scenario.cpp
+  src/metrics/metrics.cpp
   src/acoustics/engine.cpp
   src/acoustics/builtin_engines.cpp
+  src/acoustics/sabine_eyring_engine.cpp
+  src/acoustics/image_source_engine.cpp
 )
 
 add_library(av::core ALIAS av_core)

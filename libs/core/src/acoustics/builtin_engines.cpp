@@ -2,9 +2,14 @@
 
 namespace av {
 
-void linkBuiltinEngines() {
-  // No built-in engines yet; REGISTER_ENGINE TUs will hang off this link.
+// Defined in the engine translation units; referencing them pulls those TUs
+// out of the static library so their REGISTER_ENGINE initializers run.
+void forceLinkSabineEyringEngine();
+void forceLinkImageSourceEngine();
 
+void linkBuiltinEngines() {
+  forceLinkSabineEyringEngine();
+  forceLinkImageSourceEngine();
 }
 
 }  // namespace av

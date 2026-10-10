@@ -19,6 +19,7 @@ struct EngineDescriptor {
   std::string version;        // "1.0.0"
   Capabilities caps;
   nlohmann::json paramsSchema; // JSON Schema → GUI рисует форму
+  std::vector<std::string> artifacts; // subset of ir|metrics|field|rays|findings
 };
 
 struct ValidateResult {

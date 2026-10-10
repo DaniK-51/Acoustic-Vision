@@ -104,6 +104,7 @@ struct EngineDescriptor {
   std::string version;
   Capabilities caps;
   nlohmann::json paramsSchema; // JSON Schema → GUI auto-form
+  std::vector<std::string> artifacts; // subset of ir|metrics|field|rays|findings
 };
 
 struct ValidateResult {
@@ -155,7 +156,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - CancelToken must be polled in engine inner loops (required from P0).
 
 ### metrics
-- `IrBuffer`: multi-channel (one per receiver), per-band or broadband; `sampleRate`, `duration`.
+- `IrBuffer`: multi-channel broadband (one channel per source×receiver pair, name `srcId:rcvId`); `sampleRate`. Per-band IR packs (if ever) are separate IrBuffers — not 3D in one buffer (ADR).
 - `RT60`: Schroeder backward integration + linear fit of −5…−35 dB (T30); also report Sabine & Eyring analytic.
 - `EDT`: 0 → −10 dB fit.
 - `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, (optional) path polyline for GUI.
