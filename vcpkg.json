@@ -1,0 +1,9 @@
+{
+  "name": "acoustic-vision",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "eigen3",
+    "nlohmann-json",
+    "gtest"
+  ]
+}
