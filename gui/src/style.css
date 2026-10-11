@@ -1,0 +1,97 @@
+/* Global shell styles. Panels keep their own scoped rules. */
+
+:root {
+  --bg: #12151a;
+  --bg-panel: #1a1f27;
+  --bg-inset: #0e1116;
+  --border: #2a3140;
+  --text: #d7dde8;
+  --text-dim: #8b95a7;
+  --accent: #4f8cff;
+  --ok: #3ecf8e;
+  --warn: #e6b84d;
+  --err: #e05d5d;
+  --mono: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 'Segoe UI', system-ui, sans-serif;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: #243044;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #2d3c55;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+}
+
+textarea {
+  font-family: var(--mono);
+  font-size: 12px;
+  resize: vertical;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.error-text {
+  color: var(--err);
+  white-space: pre-wrap;
+}
+
+.dim {
+  color: var(--text-dim);
+}
+
+.mono {
+  font-family: var(--mono);
+}

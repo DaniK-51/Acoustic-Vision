@@ -18,6 +18,10 @@ Testing/
 vcpkg_installed/
 _deps/
 node_modules/
+gui/node_modules/
+
+# GUI build output
+gui/dist/
 
 # Runtime artifacts
 *.wav
