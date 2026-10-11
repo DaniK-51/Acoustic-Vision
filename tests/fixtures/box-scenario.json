@@ -52,6 +52,7 @@
     "capturePaths": false,
     "airAbsorption": false,
     "signedIr": false,
+    "fieldGrid": { "enabled": true, "nx": 16, "ny": 8, "nz": 12 },
     "methodParams": {
       "rayCount": 2000,
       "maxBounces": 48,

@@ -535,7 +535,15 @@ def main():
             print("ok: field artifact + endpoint")
 
             # Jobs without a fieldGrid request expose no field artifact.
-            status, body = http("GET", f"{base}/v1/jobs/{mesh_id}/field")
+            # (box-scenario.json ships with fieldGrid on, so run a no-field copy.)
+            no_field = json.loads(json.dumps(mesh_scenario))
+            no_field["params"]["fieldGrid"] = {"enabled": False}
+            status, accepted = http("POST", f"{base}/v1/simulations?sync=1", no_field)
+            expect(status == 200, f"no-field sync simulation: {status} {accepted}")
+            no_field_id = accepted.get("jobId")
+            expect(isinstance(no_field_id, str) and no_field_id, "no-field jobId")
+            expect("field" not in accepted, f"no-field result keys: {accepted.keys()}")
+            status, body = http("GET", f"{base}/v1/jobs/{no_field_id}/field")
             expect(status == 404 and body.get("status") == 404,
                    f"field 404 when absent: {status} {body}")
             print("ok: field 404 when absent")
