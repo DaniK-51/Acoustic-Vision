@@ -166,8 +166,8 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 ### runs (history)
 - A **run** = scenario snapshot + engine + params + result id.
 - v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
-- **P1 handle simplification:** `jobId` doubles as simulation/result id (`GET /v1/jobs/{id}/result`, `/ir.wav`); WS `simulationId = jobId`. Split stores later without changing handle format.
-- **P2e run record** (in-memory, append on terminal — all terminal states): `id` = `jobId` (same value in both fields), `engine`, `scenarioName`, `sceneVersion` (set when submitted via `{"sceneId"}`), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first; `GET /v1/runs/{runId}` adds `links` to `result` / `ir.wav` / `field`.
+- **P1 handle:** `jobId` is the simulation/result/artifact handle (`GET /v1/jobs/{id}/result`, `/ir.wav`, `/field`); WS `simulationId = jobId`.
+- **P2e run record** (in-memory, append on terminal — all terminal states): `id` = **`runId`** (`run-…`, uuid-lite, unique per run), `jobId` field kept as the artifact handle, `engine`, `scenarioName`, `sceneVersion` (set when submitted via `{"sceneId"}`), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first (items carry both `id` and `jobId`); `GET /v1/runs/{id}` accepts **either** `runId` or `jobId` and adds `links` to `result` / `ir.wav` / `field` (paths keyed by `jobId`).
 
 ### scene store + interactive patches
 - Backend owns the **Scene Store** (full scenario state, `sceneVersion`, uint64 from 1). In-memory (`SceneStore`, thread-safe); `sceneId` is uuid-lite.
@@ -228,7 +228,7 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 | GET/POST | `/v1/sources` | list / create source (pos, orientation, power, АЧХ, directivity) |
 | GET | `/v1/source-catalog` | built-in device catalog (specs as-is, no warranty) |
 | GET | `/v1/runs` | run history (newest first; `?engine=` filter) |
-| GET | `/v1/runs/{runId}` | one run + links to result/ir/field (P2e: `runId` = `jobId`) |
+| GET | `/v1/runs/{id}` | one run + links to result/ir/field (accepts `runId` or `jobId`; links key on `jobId`) |
 | GET/POST | `/v1/receivers` | list / create receiver (pos) |
 | GET/POST | `/v1/scenarios` | list / create full scenario (refs + params) |
 | GET/PATCH/DELETE | `/v1/scenarios/{id}` | read / update / delete |

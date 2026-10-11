@@ -1,14 +1,32 @@
 #include "runs_store.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
+#include <random>
 #include <utility>
 
 namespace av::api {
 namespace {
 
 using Clock = std::chrono::system_clock;
+
+// uuid-lite for run history keys: same shape as JobManager's job ids but a
+// separate namespace so runId never collides with a jobId handle.
+[[nodiscard]] std::string makeRunId() {
+  static const std::uint32_t prefix = [] {
+    std::random_device rd;
+    return rd();
+  }();
+  static std::atomic<std::uint32_t> counter{0};
+  const std::uint32_t n = counter.fetch_add(1, std::memory_order_relaxed);
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "run-%08x-%04x", prefix,
+                static_cast<unsigned>(n & 0xffffu));
+  return std::string{buf};
+}
 
 }  // namespace
 
@@ -54,7 +72,7 @@ std::string iso8601(Clock::time_point tp) {
 
 nlohmann::json runSummaryJson(const RunRecord& run) {
   nlohmann::json json;
-  // Both fields carry the same handle (P1-P2 collapse); GUI may use either.
+  // `id` is the run-history key (`run-…`); `jobId` is the artifact handle.
   json["id"] = run.runId;
   json["jobId"] = run.jobId;
   json["engine"] = run.engine;
@@ -81,7 +99,7 @@ void RunsStore::appendLocked(const JobId& jobId, std::string state,
                              Clock::time_point finishedAt) {
   const auto pendingIt = m_pending.find(jobId);
   RunRecord record;
-  record.runId = jobId;
+  record.runId = pendingIt->second.runId;
   record.jobId = jobId;
   record.engine = pendingIt->second.engine;
   record.scenarioName = pendingIt->second.scenarioName;
@@ -101,6 +119,7 @@ void RunsStore::noteSubmitted(const JobId& jobId, std::string engine,
                               std::optional<std::uint64_t> sceneVersion) {
   std::lock_guard lock(m_mutex);
   Pending pending;
+  pending.runId = makeRunId();
   pending.engine = std::move(engine);
   pending.scenarioName = std::move(scenarioName);
   pending.sceneVersion = std::move(sceneVersion);
@@ -122,7 +141,7 @@ bool RunsStore::noteTerminal(const JobId& jobId, std::string state,
   std::lock_guard lock(m_mutex);
   const auto duplicate = std::find_if(
       m_history.begin(), m_history.end(),
-      [&jobId](const RunRecord& run) { return run.runId == jobId; });
+      [&jobId](const RunRecord& run) { return run.jobId == jobId; });
   if (duplicate != m_history.end()) {
     return false;
   }
@@ -156,11 +175,11 @@ std::vector<RunRecord> RunsStore::list(
   return out;
 }
 
-std::optional<RunRecord> RunsStore::get(const JobId& runId) const {
+std::optional<RunRecord> RunsStore::get(const std::string& id) const {
   std::lock_guard lock(m_mutex);
   const auto it = std::find_if(
       m_history.begin(), m_history.end(),
-      [&runId](const RunRecord& run) { return run.runId == runId; });
+      [&id](const RunRecord& run) { return run.runId == id || run.jobId == id; });
   if (it == m_history.end()) {
     return std::nullopt;
   }

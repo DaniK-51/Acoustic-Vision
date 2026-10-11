@@ -58,8 +58,10 @@ TEST(RunsStoreTest, TerminalRunIsRecordedAndListedNewestFirst) {
 
   const std::vector<av::api::RunRecord> runs = store.list();
   ASSERT_EQ(runs.size(), 2u);
-  EXPECT_EQ(runs[0].runId, "job-b");
-  EXPECT_EQ(runs[1].runId, "job-a");
+  EXPECT_EQ(runs[0].jobId, "job-b");
+  EXPECT_EQ(runs[1].jobId, "job-a");
+  EXPECT_NE(runs[0].runId, runs[0].jobId);
+  EXPECT_TRUE(runs[0].runId.rfind("run-", 0) == 0);
   EXPECT_EQ(runs[0].state, "succeeded");
   EXPECT_EQ(runs[0].engine, "image-source");
   EXPECT_EQ(runs[0].scenarioName, "demo");
@@ -78,7 +80,7 @@ TEST(RunsStoreTest, EngineFilterSelectsMatchingRuns) {
   const std::vector<av::api::RunRecord> onlyRay =
       store.list(std::string("ray-tracing"));
   ASSERT_EQ(onlyRay.size(), 1u);
-  EXPECT_EQ(onlyRay[0].runId, "job-b");
+  EXPECT_EQ(onlyRay[0].jobId, "job-b");
   EXPECT_EQ(onlyRay[0].state, "failed");
 
   EXPECT_EQ(store.list(std::string("no-such-engine")).size(), 0u);
@@ -109,11 +111,27 @@ TEST(RunsStoreTest, GetReturnsDetailAndUnknownIsNullopt) {
                       nlohmann::json{{"engine", "image-source"}}, t0 - 10s);
   store.noteTerminal("job-a", "succeeded", t0);
 
+  // Backwards lookup by jobId still resolves the record.
   const std::optional<av::api::RunRecord> run = store.get("job-a");
   ASSERT_TRUE(run.has_value());
-  EXPECT_EQ(run->runId, "job-a");
-  EXPECT_EQ(run->jobId, "job-a");  // P1-P2 handle collapse
+  EXPECT_NE(run->runId, run->jobId);  // handle split: runId is its own id
+  EXPECT_TRUE(run->runId.rfind("run-", 0) == 0);
+  EXPECT_EQ(run->jobId, "job-a");
   EXPECT_FALSE(store.get("job-missing").has_value());
+}
+
+TEST(RunsStoreTest, GetAcceptsBothRunIdAndJobId) {
+  av::api::RunsStore store;
+  const auto t0 = Clock::now();
+  store.noteSubmitted("job-x", "image-source", "demo", {}, t0 - 10s);
+  ASSERT_TRUE(store.noteTerminal("job-x", "succeeded", t0));
+
+  const std::optional<av::api::RunRecord> byJob = store.get("job-x");
+  ASSERT_TRUE(byJob.has_value());
+  const std::optional<av::api::RunRecord> byRun = store.get(byJob->runId);
+  ASSERT_TRUE(byRun.has_value());
+  EXPECT_EQ(byRun->runId, byJob->runId);
+  EXPECT_EQ(byRun->jobId, byJob->jobId);
 }
 
 TEST(RunsStoreTest, DuplicateTerminalIsIgnored) {
@@ -139,11 +157,13 @@ TEST(RunsStoreTest, TerminalBeforeSubmitStillRecords) {
   EXPECT_EQ(run->state, "succeeded");
   EXPECT_EQ(run->engine, "image-source");
   EXPECT_EQ(run->finishedAt, t0);
+  EXPECT_TRUE(run->runId.rfind("run-", 0) == 0);  // minted at noteSubmitted
+  EXPECT_EQ(run->jobId, "job-fast");
 }
 
 TEST(RunsStoreTest, RunJsonSummaryAndDetailShape) {
   av::api::RunRecord record;
-  record.runId = "job-1";
+  record.runId = "run-1";
   record.jobId = "job-1";
   record.engine = "image-source";
   record.scenarioName = "demo";
@@ -153,7 +173,7 @@ TEST(RunsStoreTest, RunJsonSummaryAndDetailShape) {
   record.paramsDigest = nlohmann::json{{"engine", "image-source"}};
 
   const nlohmann::json summary = av::api::runSummaryJson(record);
-  EXPECT_EQ(summary.at("id"), "job-1");
+  EXPECT_EQ(summary.at("id"), "run-1");
   EXPECT_EQ(summary.at("jobId"), "job-1");
   EXPECT_EQ(summary.at("engine"), "image-source");
   EXPECT_EQ(summary.at("scenarioName"), "demo");

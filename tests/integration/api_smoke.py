@@ -283,10 +283,15 @@ def main():
         status, runs = http("GET", f"{base}/v1/runs")
         expect(status == 200 and isinstance(runs, list), f"GET /v1/runs: {status} {runs}")
         run_ids = [r.get("id") for r in runs]
-        expect(job_id in run_ids, f"sync run recorded: {run_ids}")
-        expect(async_id in run_ids, f"async run recorded: {run_ids}")
+        run_job_ids = [r.get("jobId") for r in runs]
+        expect(job_id in run_job_ids, f"sync run recorded: {run_job_ids}")
+        expect(async_id in run_job_ids, f"async run recorded: {run_job_ids}")
+        expect(len(set(run_ids)) == len(run_ids), f"run ids unique: {run_ids}")
         for r in runs:
-            expect(r.get("id") == r.get("jobId"), f"run id==jobId: {r}")
+            # Handle split: `id` is the run key (run-…), `jobId` the artifact handle.
+            expect(r.get("id") != r.get("jobId"), f"run id != jobId: {r}")
+            expect(str(r.get("id", "")).startswith("run-"), f"run id prefix: {r}")
+            expect(str(r.get("jobId", "")).startswith("job-"), f"run jobId prefix: {r}")
             expect(r.get("state") in ("succeeded", "failed", "cancelled"), f"run state: {r}")
             expect(r.get("engine") == scenario["params"]["engine"], f"run engine: {r}")
             expect(r.get("scenarioName") == scenario.get("name"), f"run scenarioName: {r}")
@@ -305,17 +310,24 @@ def main():
         expect(status == 200 and none_runs == [], f"filter miss: {status} {none_runs}")
         print("ok: runs engine filter")
 
+        # GET /v1/runs/{id} accepts either handle: jobId (backwards) and runId.
         status, run = http("GET", f"{base}/v1/runs/{async_id}")
-        expect(status == 200, f"GET /v1/runs/{{id}}: {status} {run}")
-        expect(run.get("id") == async_id and run.get("jobId") == async_id, f"run detail ids: {run}")
+        expect(status == 200, f"GET /v1/runs/{{jobId}}: {status} {run}")
+        run_id = run.get("id")
+        expect(run.get("jobId") == async_id, f"run detail jobId: {run}")
+        expect(isinstance(run_id, str) and run_id.startswith("run-"),
+               f"run detail id: {run}")
         expect(run.get("state") == "succeeded", f"run detail state: {run}")
         links = run.get("links", {})
         expect(links.get("result") == f"/v1/jobs/{async_id}/result", f"run links result: {links}")
         expect(links.get("ir") == f"/v1/jobs/{async_id}/ir.wav", f"run links ir: {links}")
         expect(links.get("field") == f"/v1/jobs/{async_id}/field", f"run links field: {links}")
+        status, by_run = http("GET", f"{base}/v1/runs/{run_id}")
+        expect(status == 200 and by_run.get("id") == run_id
+               and by_run.get("jobId") == async_id, f"GET /v1/runs/{{runId}}: {status} {by_run}")
         status, body = http("GET", f"{base}/v1/runs/nope")
         expect(status == 404 and body.get("status") == 404, f"run 404: {status} {body}")
-        print("ok: run detail + 404")
+        print("ok: run detail (runId+jobId) + 404")
 
         # Scene Store + WS scene.patch (interactive mode, docs/idea.md).
         status, created = http("POST", f"{base}/v1/scenarios", scenario)
@@ -512,7 +524,7 @@ def main():
         # Cancelled (or late-succeeded) jobs are terminal — history keeps them.
         status, runs = http("GET", f"{base}/v1/runs")
         expect(status == 200, f"runs after cancel: {status} {runs}")
-        heavy_runs = [r for r in runs if r.get("id") == heavy_id]
+        heavy_runs = [r for r in runs if r.get("jobId") == heavy_id]
         expect(len(heavy_runs) == 1, f"heavy run recorded: {runs}")
         expect(heavy_runs[0]["state"] in ("cancelled", "succeeded"),
                f"heavy run state: {heavy_runs[0]}")

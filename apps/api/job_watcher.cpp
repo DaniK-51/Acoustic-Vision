@@ -64,7 +64,7 @@ void JobWatcher::publishTerminal(const JobStatus& status) {
   switch (status.state) {
     case JobState::Succeeded: {
       nlohmann::json fields;
-      // P1 simplification: jobId doubles as the simulation/result handle.
+      // simulationId stays the jobId (artifact handle), not the runId.
       fields["simulationId"] = status.id;
       fields["summary"] =
           status.result && status.result->metrics

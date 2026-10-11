@@ -17,8 +17,8 @@
 namespace av::api {
 
 // Snapshot of a finished job for the runs history (P2e).
-// runId == jobId: P1-P2 handle collapse, same id in both fields (ARCHITECTURE
-// "runs (history)").
+// Handle split: runId (`run-…`) is the runs-history key; jobId (`job-…`) stays
+// the artifact handle (`/v1/jobs/{jobId}/…`). GET /v1/runs/{id} accepts either.
 struct RunRecord {
   std::string runId;
   std::string jobId;
@@ -37,9 +37,9 @@ struct RunRecord {
 
 [[nodiscard]] nlohmann::json paramsDigestOf(const SimParams& params);
 
-// Array item for GET /v1/runs: the record without artifact links.
+// Array item for GET /v1/runs: `id` = runId, `jobId` = artifact handle.
 [[nodiscard]] nlohmann::json runSummaryJson(const RunRecord& run);
-// GET /v1/runs/{runId}: record + links into the /v1/jobs/{jobId}/... artifacts.
+// GET /v1/runs/{id}: record + links into the /v1/jobs/{jobId}/... artifacts.
 [[nodiscard]] nlohmann::json runToJson(const RunRecord& run);
 
 [[nodiscard]] std::string iso8601(std::chrono::system_clock::time_point tp);
@@ -48,6 +48,8 @@ struct RunRecord {
 class RunsStore {
  public:
   // Submit-time metadata (JobStatus alone cannot rebuild the record later).
+  // Also mints the run's own runId (`run-…`) once at submit so the handle is
+  // stable even if the terminal note lands first.
   void noteSubmitted(const JobId& jobId, std::string engine,
                      std::string scenarioName, nlohmann::json paramsDigest,
                      std::chrono::system_clock::time_point submittedAt,
@@ -61,10 +63,12 @@ class RunsStore {
   [[nodiscard]] std::vector<RunRecord> list(
       const std::optional<std::string>& engineFilter = std::nullopt) const;
 
-  [[nodiscard]] std::optional<RunRecord> get(const JobId& runId) const;
+  // Lookup by runId or jobId (same record either way).
+  [[nodiscard]] std::optional<RunRecord> get(const std::string& id) const;
 
  private:
   struct Pending {
+    std::string runId;
     std::string engine;
     std::string scenarioName;
     std::optional<std::uint64_t> sceneVersion;

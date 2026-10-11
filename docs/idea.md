@@ -137,7 +137,7 @@ JSON-документ (`schemas/scenario.schema.json`):
 
 Один **run** = scenario + engine + params + Result. История — список runs по сцене (без сложного Study/diff в v1). UI может показать два run’а рядом глазами.
 
-Запись run (P2e): `id` = `jobId` (один handle), engine, scenarioName, sceneVersion (может отсутствовать), submittedAt/finishedAt, state, paramsDigest (engine + ключевые sim-параметры). Все терминальные job'ы (включая failed/cancelled) попадают в историю.
+Запись run (P2e): `id` = **`runId`** (`run-…`, уникальный ключ истории), `jobId` — handle для артефактов (`/v1/jobs/{jobId}/…`), engine, scenarioName, sceneVersion (может отсутствовать), submittedAt/finishedAt, state, paramsDigest (engine + ключевые sim-параметры). `GET /v1/runs/{id}` принимает **либо `runId`, либо `jobId`**. Все терминальные job'ы (включая failed/cancelled) попадают в историю.
 
 ## 6. API (контракт для GUI)
 
@@ -154,7 +154,7 @@ JSON-документ (`schemas/scenario.schema.json`):
 | POST | `/v1/rooms/import` | OBJ/glTF → room |
 | POST | `/v1/simulations` | запуск → job (WS progress) или `?sync=1` |
 | GET | `/v1/runs` | **история запусков** (новые сверху; фильтр `?engine=`) |
-| GET | `/v1/runs/{runId}` | один run + ссылки на result/ir/field (`runId` = `jobId`) |
+| GET | `/v1/runs/{id}` | один run + ссылки на result/ir/field (принимает `runId` или `jobId`; ссылки по `jobId`) |
 | GET | `/v1/simulations/{id}/ir` \| `/metrics` \| `/paths` \| `/field` | артефакты |
 | GET | `/v1/jobs/{id}` · POST `/v1/jobs/{id}/cancel` | async lifecycle |
 | GET | `/v1/bands` | сетка частот |
