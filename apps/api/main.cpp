@@ -30,6 +30,7 @@
 
 #include "api_support.hpp"
 #include "runs_store.hpp"
+#include "scene_store.hpp"
 
 #ifndef AV_VERSION
 #define AV_VERSION "0.0.0"
@@ -194,6 +195,7 @@ std::string joinErrors(const std::vector<std::string>& errors) {
 
 void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
                     av::api::EventHub& hub, av::api::RunsStore& runs,
+                    av::api::SceneStore& scenes,
                     const av::SourceCatalog& sourceCatalog) {
   CROW_ROUTE(app, "/v1/health").methods(crow::HTTPMethod::Get)([] {
     nlohmann::json engines = nlohmann::json::array();
@@ -232,13 +234,63 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
         return jsonRes(200, av::sourceCatalogToJson(sourceCatalog));
       });
 
-  CROW_ROUTE(app, "/v1/simulations").methods(crow::HTTPMethod::Post)(
-      [&jobs, &runs](const crow::request& req) {
+  // Scene Store (interactive mode, docs/idea.md): full scenario lives on the
+  // backend; WS scene.patch applies mover deltas against it. In-memory only.
+  CROW_ROUTE(app, "/v1/scenarios").methods(crow::HTTPMethod::Post)(
+      [&scenes](const crow::request& req) {
         nlohmann::json body;
         try {
           body = nlohmann::json::parse(req.body);
         } catch (const std::exception& error) {
           return problemRes(400, "invalid JSON body", error.what());
+        }
+        av::Scenario scenario;
+        try {
+          scenario = av::scenarioFromJson(body);
+        } catch (const std::exception& error) {
+          return problemRes(400, "invalid scenario", error.what());
+        }
+        const av::api::SceneSnapshot snapshot = scenes.create(std::move(scenario));
+        nlohmann::json out;
+        out["sceneId"] = snapshot.sceneId;
+        out["sceneVersion"] = snapshot.sceneVersion;
+        return jsonRes(201, out);
+      });
+
+  CROW_ROUTE(app, "/v1/scenarios/<str>").methods(crow::HTTPMethod::Get)(
+      [&scenes](const std::string& sceneId) {
+        const std::optional<av::api::SceneSnapshot> snapshot = scenes.get(sceneId);
+        if (!snapshot.has_value()) {
+          return problemRes(404, "scene not found", sceneId);
+        }
+        nlohmann::json out;
+        out["sceneId"] = snapshot->sceneId;
+        out["sceneVersion"] = snapshot->sceneVersion;
+        out["scenario"] = av::scenarioToJson(snapshot->scenario);
+        return jsonRes(200, out);
+      });
+
+  CROW_ROUTE(app, "/v1/simulations").methods(crow::HTTPMethod::Post)(
+      [&jobs, &runs, &scenes](const crow::request& req) {
+        nlohmann::json body;
+        try {
+          body = nlohmann::json::parse(req.body);
+        } catch (const std::exception& error) {
+          return problemRes(400, "invalid JSON body", error.what());
+        }
+
+        // Scene-based submit: {"sceneId"} replaces an inline scenario; the
+        // stored snapshot (with its sceneVersion) is the run's scenario.
+        std::optional<std::uint64_t> sceneVersion;
+        if (body.contains("sceneId")) {
+          const std::string sceneId = body.at("sceneId").get<std::string>();
+          const std::optional<av::api::SceneSnapshot> snapshot =
+              scenes.get(sceneId);
+          if (!snapshot.has_value()) {
+            return problemRes(404, "scene not found", sceneId);
+          }
+          sceneVersion = snapshot->sceneVersion;
+          body = av::scenarioToJson(snapshot->scenario);
         }
 
         av::Scenario scenario;
@@ -272,10 +324,17 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
         // Snapshot run metadata before the scenario moves into the job.
         const std::string runEngine = scenario.params.engine;
         const std::string runName = scenario.name;
-        const nlohmann::json runDigest = av::api::paramsDigestOf(scenario.params);
+        nlohmann::json runDigest = av::api::paramsDigestOf(scenario.params);
+        if (sceneVersion.has_value()) {
+          runDigest["sceneVersion"] = *sceneVersion;
+        }
         const av::JobId id = jobs.submit(std::move(scenario));
-        runs.noteSubmitted(id, runEngine, runName, runDigest,
-                           std::chrono::system_clock::now());
+        runs.noteSubmitted(
+            id, runEngine, runName, runDigest,
+            std::chrono::system_clock::now(),
+            sceneVersion.has_value()
+                ? std::optional<std::string>{std::to_string(*sceneVersion)}
+                : std::nullopt);
         if (!wantsSync(req)) {
           nlohmann::json out;
           out["jobId"] = id;
@@ -401,19 +460,54 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
 
   CROW_WEBSOCKET_ROUTE(app, "/v1/events")
       .onopen([&hub](crow::websocket::connection& conn) { hub.add(conn); })
-      .onmessage([&hub](crow::websocket::connection& conn,
-                        const std::string& data, bool is_binary) {
+      .onmessage([&hub, &scenes](crow::websocket::connection& conn,
+                                 const std::string& data, bool is_binary) {
         if (is_binary) {
           return;
         }
+        nlohmann::json msg;
         try {
-          const nlohmann::json msg = nlohmann::json::parse(data);
-          if (msg.value("op", "") == "subscribe") {
-            hub.subscribe(conn, msg.value("jobId", ""));
-          }
+          msg = nlohmann::json::parse(data);
         } catch (const std::exception&) {
           // Malformed client frames are ignored; REST stays authoritative.
+          return;
         }
+        const std::string op = msg.value("op", "");
+        if (op == "subscribe") {
+          hub.subscribe(conn, msg.value("jobId", ""));
+          return;
+        }
+        if (op != "scene.patch") {
+          // Unknown ops are ignored (same contract as malformed frames).
+          return;
+        }
+
+        // scene.patch: {"op","sceneId","ops":[...]}. Every op must land or the
+        // whole patch is rejected (SceneStore::patch); reply on this connection.
+        auto reply = [&conn](const nlohmann::json& body) {
+          conn.send_text(body.dump());
+        };
+        const std::string sceneId = msg.value("sceneId", "");
+        if (sceneId.empty()) {
+          reply({{"event", "scene.error"}, {"detail", "sceneId is required"}});
+          return;
+        }
+        std::vector<av::api::ScenePatchOp> ops;
+        if (const std::string error =
+                av::api::parsePatchOps(msg.value("ops", nlohmann::json()), ops);
+            !error.empty()) {
+          reply({{"event", "scene.error"}, {"detail", error}});
+          return;
+        }
+        const av::api::PatchResult result = scenes.patch(sceneId, ops);
+        if (!result.ok) {
+          reply({{"event", "scene.error"}, {"detail", result.error}});
+          return;
+        }
+        reply({{"event", "scene.patched"},
+               {"sceneId", sceneId},
+               {"sceneVersion", result.sceneVersion},
+               {"applied", result.applied}});
       })
       .onclose([&hub](crow::websocket::connection& conn,
                       const std::string& /*reason*/) {
@@ -455,10 +549,11 @@ int main(int argc, char** argv) {
   av::JobManager jobs;
   av::api::EventHub hub;
   av::api::RunsStore runs;
+  av::api::SceneStore scenes;
   JobWatcher watcher(jobs, hub, runs);
 
   crow::SimpleApp app;
-  registerRoutes(app, jobs, hub, runs, sourceCatalog);
+  registerRoutes(app, jobs, hub, runs, scenes, sourceCatalog);
   watcher.start();
 
   std::cout << "av-api listening on http://" << bindAddr << ':' << port

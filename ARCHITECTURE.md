@@ -167,13 +167,22 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - A **run** = scenario snapshot + engine + params + result id.
 - v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
 - **P1 handle simplification:** `jobId` doubles as simulation/result id (`GET /v1/jobs/{id}/result`, `/ir.wav`); WS `simulationId = jobId`. Split stores later without changing handle format.
-- **P2e run record** (in-memory, append on terminal — all terminal states): `id` = `jobId` (same value in both fields), `engine`, `scenarioName`, `sceneVersion` (optional until Scene Store), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first; `GET /v1/runs/{runId}` adds `links` to `result` / `ir.wav` / `field`.
+- **P2e run record** (in-memory, append on terminal — all terminal states): `id` = `jobId` (same value in both fields), `engine`, `scenarioName`, `sceneVersion` (set when submitted via `{"sceneId"}`), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first; `GET /v1/runs/{runId}` adds `links` to `result` / `ir.wav` / `field`.
 
 ### scene store + interactive patches
-- Backend owns the **Scene Store** (full scenario state, `sceneVersion`).
-- Interactive edits use WS deltas, not full recompute:
-  - client → `scene.patch` `{ sceneId, ops: [{op: move, id, position}, …] }`
-  - server → `scene.patched` `{ sceneId, sceneVersion, ops? }`
+- Backend owns the **Scene Store** (full scenario state, `sceneVersion`, uint64 from 1). In-memory (`SceneStore`, thread-safe); `sceneId` is uuid-lite.
+- REST: `POST /v1/scenarios` (scenario JSON → `{sceneId, sceneVersion}`), `GET /v1/scenarios/{sceneId}` (→ `{sceneId, sceneVersion, scenario}`). `POST /v1/simulations` accepts `{"sceneId"}` instead of an inline scenario; the stored snapshot runs and its `sceneVersion` lands in the run record / `paramsDigest`.
+- Interactive edits use WS deltas on `/v1/events`, not full recompute:
+  - client → `scene.patch` `{ "op": "scene.patch", sceneId, ops: [...] }`
+  - server → `scene.patched` `{ sceneId, sceneVersion, applied }` or `scene.error` `{ detail }` (same connection)
+- **v1 patch ops** (all-or-nothing per message; one `sceneVersion` bump per accepted patch):
+
+  | op | fields | effect |
+  |---|---|---|
+  | `move` | `entityType`: `"source"`\|`"receiver"`, `id`, `position`: `[x,y,z]` | sets entity position |
+  | `setPower` | `entityType`: `"source"`, `id`, `powerDb` | sets source power |
+
+  Unknown `op`, unknown entity id, or malformed fields → `scene.error`, scene untouched. `rotate` and material patches are deferred (rejected as unknown ops in v1).
 - Static geometry/materials uploaded once (REST); only movers stream over WS.
 - Compute runs snapshot the scene at `sceneVersion` for reproducibility.
 
@@ -244,8 +253,9 @@ Server events (JSON):
 
 | event | payload |
 |---|---|
-| `scene.patch` | client→server: delta ops (move/rotate/param) |
-| `scene.patched` | server→client: ack + `sceneVersion` |
+| `scene.patch` | client→server: delta ops (v1: `move`, `setPower`) |
+| `scene.patched` | server→client: ack + `sceneVersion`, `applied` |
+| `scene.error` | server→client: patch rejected (`detail`); scene unchanged |
 | `job.progress` | `jobId`, `fraction` 0..1, `stage` |
 | `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
 | `job.failed` | `jobId`, `error` |

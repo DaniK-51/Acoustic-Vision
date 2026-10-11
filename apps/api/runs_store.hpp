@@ -23,7 +23,7 @@ struct RunRecord {
   std::string jobId;
   std::string engine;
   std::string scenarioName;
-  // Absent until the Scene Store exists; may reappear with P3 scene.patch.
+  // Set when the run was submitted from the Scene Store (`{"sceneId"}`).
   std::optional<std::string> sceneVersion;
   // jobStateName of the terminal state: "succeeded"|"failed"|"cancelled".
   std::string state;

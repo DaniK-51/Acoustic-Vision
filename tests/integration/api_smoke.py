@@ -317,6 +317,99 @@ def main():
         expect(status == 404 and body.get("status") == 404, f"run 404: {status} {body}")
         print("ok: run detail + 404")
 
+        # Scene Store + WS scene.patch (interactive mode, docs/idea.md).
+        status, created = http("POST", f"{base}/v1/scenarios", scenario)
+        expect(status == 201, f"POST /v1/scenarios: {status} {created}")
+        scene_id = created.get("sceneId")
+        expect(isinstance(scene_id, str) and scene_id, f"sceneId: {created}")
+        expect(created.get("sceneVersion") == 1, f"initial sceneVersion: {created}")
+        print(f"ok: scene create ({scene_id})")
+
+        status, loaded = http("GET", f"{base}/v1/scenarios/{scene_id}")
+        expect(status == 200, f"GET /v1/scenarios: {status} {loaded}")
+        expect(loaded.get("sceneId") == scene_id, f"scene get id: {loaded}")
+        expect(loaded.get("sceneVersion") == 1, f"scene get version: {loaded}")
+        body_scenario = loaded.get("scenario")
+        expect(isinstance(body_scenario, dict) and body_scenario.get("name") == scenario.get("name"),
+               f"scenario payload: {body_scenario}")
+        expect(body_scenario.get("sources") == scenario.get("sources"),
+               f"scenario sources round-trip: {body_scenario.get('sources')}")
+        status, body = http("GET", f"{base}/v1/scenarios/nope")
+        expect(status == 404 and body.get("status") == 404, f"scene 404: {status} {body}")
+        print("ok: scene get + 404")
+
+        ws = MiniWs("127.0.0.1", port, "/v1/events")
+        ws.send_text(json.dumps({
+            "op": "scene.patch",
+            "sceneId": scene_id,
+            "ops": [
+                {"op": "move", "entityType": "source", "id": "src-1",
+                 "position": [2.0, 1.2, 2.0]},
+                {"op": "setPower", "entityType": "source", "id": "src-1",
+                 "powerDb": 55.0},
+            ],
+        }))
+        ack = json.loads(ws.recv_text(timeout=5.0))
+        expect(ack.get("event") == "scene.patched", f"scene.patched ack: {ack}")
+        expect(ack.get("sceneId") == scene_id, f"ack sceneId: {ack}")
+        expect(ack.get("sceneVersion") == 2, f"ack version: {ack}")
+        expect(ack.get("applied") == 2, f"ack applied: {ack}")
+        print("ok: WS scene.patch round-trip")
+
+        # Unknown op -> scene.error (and the scene stays untouched).
+        ws.send_text(json.dumps({
+            "op": "scene.patch",
+            "sceneId": scene_id,
+            "ops": [{"op": "rotate", "entityType": "source", "id": "src-1",
+                     "yawDeg": 30.0}],
+        }))
+        err = json.loads(ws.recv_text(timeout=5.0))
+        expect(err.get("event") == "scene.error", f"scene.error event: {err}")
+        expect("rotate" in err.get("detail", ""), f"scene.error detail: {err}")
+        ws.send_text(json.dumps({
+            "op": "scene.patch",
+            "sceneId": "nope",
+            "ops": [{"op": "move", "entityType": "source", "id": "src-1",
+                     "position": [0, 0, 0]}],
+        }))
+        err = json.loads(ws.recv_text(timeout=5.0))
+        expect(err.get("event") == "scene.error", f"scene.error unknown scene: {err}")
+        ws.close()
+        print("ok: WS scene.error paths")
+
+        status, loaded = http("GET", f"{base}/v1/scenarios/{scene_id}")
+        expect(status == 200 and loaded.get("sceneVersion") == 2,
+               f"scene version after patch: {status} {loaded}")
+        moved = loaded["scenario"]["sources"][0]
+        expect(moved.get("id") == "src-1", f"source id: {moved}")
+        expect(moved.get("position") == [2.0, 1.2, 2.0], f"moved position: {moved}")
+        expect(moved.get("powerDb") == 55.0, f"patched powerDb: {moved}")
+        print("ok: scene state after patch")
+
+        # Scene-based submit: {"sceneId"} snapshot + sceneVersion in the run.
+        status, accepted = http("POST", f"{base}/v1/simulations", {"sceneId": scene_id})
+        expect(status == 202 and accepted.get("jobId"), f"scene submit: {status} {accepted}")
+        scene_job = accepted["jobId"]
+        for _ in range(80):
+            status, st = http("GET", f"{base}/v1/jobs/{scene_job}")
+            expect(status == 200, f"scene job status: {status} {st}")
+            if st.get("state") in ("succeeded", "failed", "cancelled"):
+                break
+            time.sleep(0.1)
+        expect(st.get("state") == "succeeded", f"scene job state: {st}")
+        status, run = http("GET", f"{base}/v1/runs/{scene_job}")
+        expect(status == 200, f"scene run: {status} {run}")
+        expect(run.get("sceneVersion") == "2", f"run sceneVersion: {run}")
+        expect(run.get("paramsDigest", {}).get("sceneVersion") == 2,
+               f"paramsDigest sceneVersion: {run}")
+        print("ok: scene-based simulation + run sceneVersion")
+
+        status, body = http("POST", f"{base}/v1/simulations", {"sceneId": "nope"})
+        expect(status == 404 and body.get("status") == 404, f"scene submit 404: {status} {body}")
+        status, body = http("POST", f"{base}/v1/scenarios", {"schemaVersion": 1})
+        expect(status == 400 and body.get("status") == 400, f"bad scene create: {status} {body}")
+        print("ok: scene error paths")
+
         # P2c: mesh room with loadedMesh filled at the API boundary completes.
         if mesh_scenario is not None:
             status, accepted = http("POST", f"{base}/v1/simulations", mesh_scenario)
