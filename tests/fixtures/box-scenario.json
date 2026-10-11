@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "name": "box-scenario",
+  "room": {
+    "type": "mesh",
+    "mesh": {
+      "uri": "box.obj",
+      "unit": "m",
+      "scale": 1.0,
+      "materialOverrides": {
+        "floor": "mat-carpet",
+        "ceiling": "mat-plaster",
+        "walls": "mat-brick"
+      }
+    }
+  },
+  "materials": [
+    {
+      "id": "mat-carpet",
+      "name": "Carpet on concrete",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.2, 0.3, 0.4, 0.4, 0.4],
+      "scattering": 0.1
+    },
+    {
+      "id": "mat-plaster",
+      "name": "Plasterboard",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.1, 0.15, 0.2, 0.2, 0.2],
+      "scattering": 0.1
+    },
+    {
+      "id": "mat-brick",
+      "name": "Painted brick",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.1, 0.12, 0.15, 0.15, 0.2],
+      "scattering": 0.1
+    }
+  ],
+  "sources": [
+    { "id": "src-1", "position": [0.3, 0.5, 0.3], "powerDb": 80.0 }
+  ],
+  "receivers": [
+    { "id": "rcv-1", "position": [0.7, 0.5, 0.7] }
+  ],
+  "params": {
+    "engine": "ray-tracing",
+    "sampleRate": 8000,
+    "durationSec": 0.5,
+    "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+    "speedOfSound": 343.0,
+    "capturePaths": false,
+    "airAbsorption": false,
+    "signedIr": false,
+    "methodParams": {
+      "rayCount": 2000,
+      "maxBounces": 48,
+      "seed": 3,
+      "receiverRadius": 0.25,
+      "capturePathLimit": 16
+    }
+  }
+}

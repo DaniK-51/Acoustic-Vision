@@ -162,6 +162,16 @@ def main():
     binary, scenario_path = sys.argv[1], sys.argv[2]
     with open(scenario_path) as f:
         scenario = json.load(f)
+    fixtures_dir = os.path.dirname(os.path.abspath(scenario_path))
+    mesh_scenario = None
+    mesh_scenario_path = os.path.join(fixtures_dir, "box-scenario.json")
+    box_obj = os.path.join(fixtures_dir, "box.obj")
+    if os.path.isfile(mesh_scenario_path) and os.path.isfile(box_obj):
+        with open(mesh_scenario_path) as f:
+            mesh_scenario = json.load(f)
+        # API resolves relative mesh uris against the server CWD, so pin the
+        # fixture to an absolute path for a deterministic smoke run.
+        mesh_scenario["room"]["mesh"]["uri"] = box_obj
 
     port = free_port()
     base = f"http://127.0.0.1:{port}"
@@ -243,6 +253,32 @@ def main():
         expect(status == 200 and "metrics" in job_result, f"async result: {status} {job_result}")
         expect("ir" in job_result, "async result has ir summary")
         print("ok: async result")
+
+        # P2c: mesh room with loadedMesh filled at the API boundary completes.
+        if mesh_scenario is not None:
+            status, accepted = http("POST", f"{base}/v1/simulations", mesh_scenario)
+            expect(status == 202 and accepted.get("jobId"), f"mesh submit: {status} {accepted}")
+            mesh_id = accepted["jobId"]
+            for _ in range(100):
+                status, st = http("GET", f"{base}/v1/jobs/{mesh_id}")
+                expect(status == 200, f"mesh job status: {status} {st}")
+                if st.get("state") in ("succeeded", "failed", "cancelled"):
+                    break
+                time.sleep(0.1)
+            expect(st.get("state") == "succeeded", f"mesh job state: {st}")
+            status, mesh_result = http("GET", f"{base}/v1/jobs/{mesh_id}/result")
+            expect(status == 200 and "metrics" in mesh_result, f"mesh result: {status} {mesh_result}")
+            print(f"ok: mesh scenario ({mesh_id})")
+
+            # Unresolvable mesh uri fails fast at the boundary with a clear error.
+            broken = json.loads(json.dumps(mesh_scenario))
+            broken["room"]["mesh"]["uri"] = os.path.join(fixtures_dir, "no-such-mesh.obj")
+            status, body = http("POST", f"{base}/v1/simulations", broken)
+            expect(status == 400 and "mesh" in body.get("title", "").lower(),
+                   f"broken mesh uri: {status} {body}")
+            print("ok: broken mesh uri rejected")
+        else:
+            print("note: box-scenario.json/box.obj fixtures missing; mesh smoke skipped")
 
         # Cancel smoke: heavy job, cancel early, expect terminal state + 409 on re-cancel.
         heavy = json.loads(json.dumps(scenario))

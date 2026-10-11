@@ -41,6 +41,8 @@ int runScenario(const std::filesystem::path& scenarioPath,
   av::linkBuiltinEngines();
 
   av::Scenario scenario = av::loadScenario(scenarioPath);
+  // Mesh uris resolve against the scenario file's directory (P2c policy).
+  av::fillLoadedMesh(scenario, scenarioPath.parent_path());
 
   std::unique_ptr<av::IEngine> engine =
       av::EngineRegistry::instance().create(scenario.params.engine);

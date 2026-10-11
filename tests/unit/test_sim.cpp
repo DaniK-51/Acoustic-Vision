@@ -2,6 +2,7 @@
 
 #include <av/acoustics/builtin_engines.hpp>
 #include <av/acoustics/engine.hpp>
+#include <av/io/io.hpp>
 #include <av/scenario/scenario.hpp>
 #include <av/sim/job.hpp>
 #include <av/sim/job_manager.hpp>
@@ -9,6 +10,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -260,6 +262,58 @@ TEST_F(SimTest, SubmitSabineEyringSucceeds) {
   ASSERT_TRUE(done->result.has_value());
   ASSERT_TRUE(done->result->metrics.has_value());
   EXPECT_TRUE(done->result->metrics->rt60.contains(500.0));
+}
+
+// P2c integration: fillLoadedMesh at the caller boundary, JobManager copies
+// the scenario (shared_ptr as-is) and the engine runs off the in-memory mesh.
+TEST_F(SimTest, SubmitFilledMeshScenarioSucceeds) {
+  av::linkBuiltinEngines();
+  av::Scenario scenario;
+  scenario.name = "mesh-box";
+  scenario.room.type = av::Room::Type::Mesh;
+  scenario.room.mesh.uri = (std::filesystem::path(AV_FIXTURES_DIR) / "box.obj").string();
+  scenario.room.mesh.unit = "m";
+  scenario.room.mesh.scale = 1.0;
+  scenario.room.mesh.materialOverrides = {{"floor", "mat"},
+                                          {"ceiling", "mat"},
+                                          {"walls", "mat"}};
+  av::Material material;
+  material.id = "mat";
+  material.name = "mat";
+  material.bandsHz.assign(av::kDefaultBandsHz.begin(),
+                          av::kDefaultBandsHz.end());
+  material.absorption = {0.2, 0.2, 0.2, 0.2, 0.2, 0.2};
+  scenario.materials.push_back(material);
+
+  av::Source source;
+  source.id = "src-1";
+  source.position = {0.3, 0.5, 0.3};
+  scenario.sources.push_back(source);
+  av::Receiver receiver;
+  receiver.id = "rcv-1";
+  receiver.position = {0.7, 0.5, 0.7};
+  scenario.receivers.push_back(receiver);
+
+  scenario.params.engine = "ray-tracing";
+  scenario.params.sampleRate = 8000;
+  scenario.params.durationSec = 0.3;
+  scenario.params.bandsHz.assign(av::kDefaultBandsHz.begin(),
+                                 av::kDefaultBandsHz.end());
+  scenario.params.methodParams = nlohmann::json{
+      {"rayCount", 500}, {"maxBounces", 16}, {"seed", 1}};
+
+  av::fillLoadedMesh(scenario, std::filesystem::path(AV_FIXTURES_DIR));
+  ASSERT_NE(scenario.loadedMesh, nullptr);
+
+  av::JobManager mgr(1);
+  const av::JobId id = mgr.submit(scenario);
+  const std::optional<av::JobStatus> done = mgr.wait(id, 10000ms);
+
+  ASSERT_TRUE(done.has_value());
+  EXPECT_EQ(done->state, av::JobState::Succeeded) << done->error;
+  ASSERT_TRUE(done->result.has_value());
+  ASSERT_TRUE(done->result->ir.has_value());
+  EXPECT_GT(done->result->ir->samples.size(), 0u);
 }
 
 TEST_F(SimTest, UnknownEngineFails) {

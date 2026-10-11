@@ -3,6 +3,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
@@ -40,6 +41,19 @@ std::string zoneNameForFace(const tinyobj::shape_t& shape,
     }
   }
   return shape.name.empty() ? "default" : shape.name;
+}
+
+// file:///C:/... leaves a leading slash before the Windows drive; strip the
+// scheme and that slash so the result is a plain filesystem path.
+[[nodiscard]] std::filesystem::path meshUriToPath(const std::string& uri) {
+  std::string value = uri;
+  if (value.rfind("file://", 0) == 0) {
+    value = value.substr(7);
+    if (value.size() >= 3 && value[0] == '/' && value[2] == ':') {
+      value = value.substr(1);
+    }
+  }
+  return std::filesystem::path(value);
 }
 
 }  // namespace
@@ -125,17 +139,40 @@ void applyMaterialOverrides(
 }
 
 Mesh loadMeshRoom(const MeshRoom& room) {
-  std::string uri = room.uri;
-  if (uri.rfind("file://", 0) == 0) {
-    uri = uri.substr(7);
-    // file:///C:/... leaves a leading slash before the Windows drive.
-    if (uri.size() >= 3 && uri[0] == '/' && uri[2] == ':') {
-      uri = uri.substr(1);
-    }
-  }
-  Mesh mesh = loadObj(std::filesystem::path(uri), room.unit, room.scale);
+  Mesh mesh = loadObj(meshUriToPath(room.uri), room.unit, room.scale);
   applyMaterialOverrides(mesh, room.materialOverrides);
   return mesh;
+}
+
+void fillLoadedMesh(Scenario& scenario, const std::filesystem::path& baseDir) {
+  if (scenario.room.type != Room::Type::Mesh) {
+    return;
+  }
+  if (scenario.loadedMesh != nullptr) {
+    return;
+  }
+  const std::string& uri = scenario.room.mesh.uri;
+  if (uri.empty()) {
+    return;
+  }
+
+  std::filesystem::path path = meshUriToPath(uri);
+  if (path.is_relative() && !baseDir.empty()) {
+    path = baseDir / path;
+  }
+
+  try {
+    Mesh mesh = loadObj(path, scenario.room.mesh.unit, scenario.room.mesh.scale);
+    if (mesh.triangles.empty() || mesh.positions.empty()) {
+      throw std::runtime_error("mesh has no geometry");
+    }
+    applyMaterialOverrides(mesh, scenario.room.mesh.materialOverrides);
+    scenario.loadedMesh =
+        std::make_shared<const Mesh>(std::move(mesh));
+  } catch (const std::exception& error) {
+    throw std::runtime_error("failed to load mesh '" + uri + "' from '" +
+                             path.string() + "': " + error.what());
+  }
 }
 
 }  // namespace av

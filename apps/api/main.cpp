@@ -188,6 +188,14 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
           return problemRes(400, "invalid scenario", error.what());
         }
 
+        // Mesh uris resolve against the process CWD (P2c policy). Fail fast
+        // here so the job never starts with a silent alpha=0 shell.
+        try {
+          av::fillLoadedMesh(scenario);
+        } catch (const std::exception& error) {
+          return problemRes(400, "mesh load failed", error.what());
+        }
+
         // Fail fast at the API boundary (ARCHITECTURE: 400 on engine/
         // capability mismatch) instead of only failing the async job later.
         std::unique_ptr<av::IEngine> engine =

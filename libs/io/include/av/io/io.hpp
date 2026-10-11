@@ -38,10 +38,20 @@ void applyMaterialOverrides(Mesh& mesh,
                             const std::map<std::string, std::string>& overrides);
 
 // MeshRoom fields already present in schemas/scenario.schema.json -> Mesh.
-// `room.uri` is a filesystem path (file:// prefix stripped). The JobManager
-// does NOT auto-load mesh files; engines or the API layer call this at run
-// time when a mesh room is actually consumed.
+// `room.uri` is a filesystem path (file:// prefix stripped). JobManager and
+// engines stay IO-free; disk loading happens at the CLI/API boundary via
+// fillLoadedMesh below.
 [[nodiscard]] Mesh loadMeshRoom(const MeshRoom& room);
+
+// Fills scenario.loadedMesh from room.mesh.uri (P2c boundary helper). No-op
+// unless room.type == Mesh, the uri is non-empty and loadedMesh is not set
+// yet (idempotent). Relative uris resolve against `baseDir` when non-empty,
+// otherwise against the process CWD — CLI passes the scenario file's parent
+// directory, the API leaves it empty. Throws std::runtime_error when the
+// mesh cannot be loaded or has no geometry; callers must fail the run
+// instead of letting engines see an empty shell (silent alpha=0).
+void fillLoadedMesh(Scenario& scenario,
+                    const std::filesystem::path& baseDir = {});
 
 // IEEE float32 PCM WAV (format tag 3). IrBuffer is planar [channel][sample];
 // samples are interleaved on write. Channel count and sample rate must be

@@ -72,7 +72,8 @@ struct Scenario {
   SimParams params;
   // Runtime-only mesh for mesh rooms: the caller loads room.mesh.uri and hands
   // the geometry to engines here. Not serialized to scenario JSON (the uri
-  // stays the on-disk reference); filled by JobManager/CLI/API in P2c.
+  // stays the on-disk reference); filled at the CLI/API boundary via
+  // av_io::fillLoadedMesh before submit/run (JobManager stays IO-free).
   std::shared_ptr<const Mesh> loadedMesh;
 };
 
