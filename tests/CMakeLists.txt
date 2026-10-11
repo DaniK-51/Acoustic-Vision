@@ -18,12 +18,14 @@ add_executable(av_unit_tests
   unit/test_metrics.cpp
   unit/test_engines.cpp
   unit/test_io.cpp
+  unit/test_sim.cpp
 )
 
 target_link_libraries(av_unit_tests
   PRIVATE
     av::core
     av::io
+    av::sim
     GTest::gtest_main
 )
 

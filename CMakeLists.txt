@@ -29,6 +29,7 @@ endif()
 
 add_subdirectory(libs/core)
 add_subdirectory(libs/io)
+add_subdirectory(libs/sim)
 
 add_subdirectory(apps/cli)
 
