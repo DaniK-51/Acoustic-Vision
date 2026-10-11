@@ -166,6 +166,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 ### runs (history)
 - A **run** = scenario snapshot + engine + params + result id.
 - v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
+- **P1 handle simplification:** `jobId` doubles as simulation/result id (`GET /v1/jobs/{id}/result`, `/ir.wav`); WS `simulationId = jobId`. Split stores later without changing handle format.
 
 ### scene store + interactive patches
 - Backend owns the **Scene Store** (full scenario state, `sceneVersion`).

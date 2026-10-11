@@ -9,7 +9,7 @@
 
 ## Стадия проекта
 
-**P0 delivered** (core + Engine API + sabine-eyring + image-source + av_io + av-cli). Next: **P1** (av_sim jobs + av-api REST/WS).
+**P0+P1 delivered** (core engines, av_io, av-cli, JobManager, av-api REST/WS). Next: **P2** (mesh import, ray tracing, spatial field).
 
 Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать. Новый scope — сначала в docs, потом код.
 
