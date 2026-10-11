@@ -149,7 +149,7 @@ function useDemo(): void {
     <p v-if="sceneId" class="ok mono">
       sceneId: {{ sceneId }} <span class="dim">(v{{ sceneVersion }})</span>
     </p>
-    <p class="dim hint">POST /v1/scenarios → stored snapshot; run later via Compute (GUI2).</p>
+    <p class="dim hint">POST /v1/scenarios → stored snapshot; run via Compute («Расчёт»).</p>
   </section>
 </template>
 

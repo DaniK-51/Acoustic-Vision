@@ -120,6 +120,50 @@ export interface SubmitSimulationResponse {
   jobId: string;
 }
 
+export interface Rt60Entry {
+  schroederT30: number;
+  sabine: number;
+  eyring: number;
+}
+
+export interface EarlyReflection {
+  t: number;
+  amp: number;
+  order: number;
+}
+
+export interface JobMetrics {
+  rt60: Record<string, Rt60Entry>;
+  edt: Record<string, number>;
+  earlyReflections: EarlyReflection[];
+}
+
+export interface JobIrSummary {
+  sampleRate: number;
+  durationSec: number;
+  channels: number;
+  channelNames?: string[];
+  bandsHz?: number[];
+}
+
+export interface JobFieldSummary {
+  nx: number;
+  ny: number;
+  nz: number;
+  origin?: number[];
+  cellSize?: number;
+  bandHz?: number;
+  unit?: string;
+  values?: number[];
+}
+
+/** GET /v1/jobs/{jobId}/result (resultToJson). */
+export interface JobResult {
+  metrics: JobMetrics;
+  ir?: JobIrSummary;
+  field?: JobFieldSummary;
+}
+
 export interface JobProgress {
   fraction: number;
   stage: string;

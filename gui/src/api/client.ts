@@ -1,8 +1,10 @@
 import { apiBaseUrl } from '../config';
+import { jsonEqual } from '../params-schema';
 import type {
   CreateSceneResponse,
   EngineDescriptor,
   HealthResponse,
+  JobResult,
   JobStatus,
   ProblemBody,
   RunDetail,
@@ -92,14 +94,85 @@ export const api = {
       `/scenarios/${encodeURIComponent(sceneId)}`,
     ),
 
-  submitSimulation: (body: { sceneId: string } | Scenario) =>
+  submitSimulation: (body: { sceneId: string } | Scenario | Record<string, unknown>) =>
     request<SubmitSimulationResponse>('POST', '/simulations', body),
+
+  /**
+   * Submit a run for a stored scene.
+   *
+   * POST /v1/simulations treats `{"sceneId"}` and a full scenario as mutually
+   * exclusive: a body with sceneId is replaced by the stored snapshot, so any
+   * extra keys (engine/methodParams overrides) would be dropped. When the
+   * request diverges from the snapshot we therefore send a full scenario;
+   * otherwise we send `{sceneId}` so the run keeps sceneVersion in its digest.
+   */
+  submitSimulationForScene: (
+    sceneId: string,
+    scenario: Scenario | Record<string, unknown>,
+    overrides: {
+      engine?: string;
+      methodParams?: Record<string, unknown>;
+      /** methodParams a bare {sceneId} submit would effectively run with. */
+      baselineMethodParams?: Record<string, unknown>;
+    } = {},
+  ) => {
+    const params = (scenario as Scenario).params ?? {};
+    const engineChanged =
+      overrides.engine !== undefined && overrides.engine !== params.engine;
+    const methodChanged =
+      overrides.methodParams !== undefined &&
+      !jsonEqual(
+        overrides.methodParams,
+        overrides.baselineMethodParams ?? params.methodParams ?? {},
+      );
+    if (!engineChanged && !methodChanged) {
+      return request<SubmitSimulationResponse>('POST', '/simulations', {
+        sceneId,
+      });
+    }
+    const merged = {
+      ...scenario,
+      params: {
+        ...params,
+        ...(overrides.engine !== undefined ? { engine: overrides.engine } : {}),
+        ...(overrides.methodParams !== undefined
+          ? { methodParams: overrides.methodParams }
+          : {}),
+      },
+    };
+    return request<SubmitSimulationResponse>('POST', '/simulations', merged);
+  },
 
   jobStatus: (jobId: string) =>
     request<JobStatus>('GET', `/jobs/${encodeURIComponent(jobId)}`),
 
   cancelJob: (jobId: string) =>
     request<JobStatus>('POST', `/jobs/${encodeURIComponent(jobId)}/cancel`),
+
+  jobResult: (jobId: string) =>
+    request<JobResult>('GET', `/jobs/${encodeURIComponent(jobId)}/result`),
+
+  irWavUrl: (jobId: string) =>
+    `${apiBaseUrl.replace(/\/+$/, '')}/jobs/${encodeURIComponent(jobId)}/ir.wav`,
+
+  /** Fetch ir.wav and hand it to the browser download path (sandbox-safe). */
+  downloadIrWav: async (jobId: string, filename: string): Promise<void> => {
+    const res = await fetch(api.irWavUrl(jobId));
+    if (!res.ok) {
+      const parsed = await parseBody(res);
+      throw toApiError(res.status, parsed);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
 
   listRuns: (engine?: string) =>
     request<RunSummary[]>(

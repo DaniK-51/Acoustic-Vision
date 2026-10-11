@@ -71,7 +71,6 @@ const selected = computed<EngineDescriptor | undefined>(() =>
         </tr>
       </tbody>
     </table>
-    <p class="dim hint">Params form renders from paramsSchema in GUI2.</p>
   </section>
 </template>
 
@@ -106,10 +105,5 @@ h2 {
 .row select {
   flex: 1;
   min-width: 0;
-}
-
-.hint {
-  margin: 8px 0 0;
-  font-size: 11px;
 }
 </style>

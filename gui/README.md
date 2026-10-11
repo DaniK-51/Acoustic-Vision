@@ -1,8 +1,8 @@
-# GUI (P3, slice 1)
+# GUI (P3, slice 2)
 
 Electron + Vue 3 + Three.js + Vite + TypeScript. Связь с ядром **только** через REST/WS `/v1` (GUI не линкует C++).
 
-**Статус slice 1:** каркас приложения, панели чтения, загрузка сценария, viewport-stub (сетка + бокс, орбита). Без редактора, heat-map и графов — это GUI2/3.
+**Статус slice 2:** каркас (slice 1) + запуск расчёта, форма `methodParams` из `paramsSchema`, детали прогона с метриками (RT60/EDT/early reflections), скачать `ir.wav`, наличие field. Без редактора и heat-map — это GUI3.
 
 ## Запуск
 
@@ -33,6 +33,17 @@ Base URL API: `src/config.ts` (по умолчанию `http://127.0.0.1:8787/v1
 
 CORS: av-api не отдаёт CORS-заголовков; Electron main инжектит их в `onHeadersReceived`, клиент шлёт JSON-body как `text/plain` (без preflight). В обычном браузере fetch к av-api не заработает — это desktop-контракт.
 
+## Что есть в slice 2
+
+| Панель | Источник |
+|--------|----------|
+| Method params (форма) | `engine.paramsSchema` (number/integer/boolean/string + default/min/max/enum; raw fallback) |
+| Compute («Расчёт» / «Отмена») | `POST /v1/simulations`, `POST /v1/jobs/{id}/cancel` |
+| Run detail (модалка) | `GET /v1/runs/{id}` + `GET /v1/jobs/{jobId}/result`, `ir.wav` download |
+| Status bar | job id из ответа submit + WS `job.*` (прогресс, terminal → refresh runs) |
+
+Тело submit: `{sceneId}` когда engine/methodParams не расходятся со snapshot (так run digest сохраняет `sceneVersion`); иначе — полный scenario c `params.engine` / `params.methodParams` (API при `sceneId` заменяет body snapshot'ом, поэтому overrides едут только в полном scenario).
+
 ## Что есть в slice 1
 
 | Панель | Источник |
@@ -56,15 +67,15 @@ gui/
     main.ts            # entry Vue
     App.vue            # shell + состояние панелей
     config.ts          # apiBaseUrl / eventsUrl
+    params-schema.ts   # subset JSON Schema → форма methodParams
     api/client.ts      # REST /v1
     api/types.ts       # wire-типы
     api/ws.ts          # /v1/events (subscribe/subscribeScene)
-    components/        # Engine, Catalog, LoadScenario, SceneOutline, Runs, StatusBar, Viewport
+    components/        # Engine, EngineParamsForm, RunControls, RunDetail, Catalog, LoadScenario, SceneOutline, Runs, StatusBar, Viewport
 ```
 
-## Дальше (GUI2/3, не в slice 1)
+## Дальше (GUI3, не в slice 2)
 
-- Форма `params.methodParams` из `paramsSchema`, кнопка «Расчёт» (`POST /v1/simulations`).
 - Полный 3D-редактор (gizmos, материалы, импорт OBJ/glTF), heat-map, графики IR/RT.
 - Interactive mode: WS `scene.patch` (move / setPower).
 

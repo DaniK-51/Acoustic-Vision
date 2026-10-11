@@ -5,9 +5,10 @@ defineProps<{
   runs: RunSummary[];
   loading: boolean;
   error: string;
+  selectedRunId?: string;
 }>();
 
-const emit = defineEmits<{ refresh: [] }>();
+const emit = defineEmits<{ refresh: []; select: [run: RunSummary] }>();
 
 function shortId(id: string): string {
   return id.length > 14 ? `${id.slice(0, 12)}…` : id;
@@ -44,7 +45,14 @@ function whenText(iso: string): string {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="run in runs" :key="run.id" :title="run.id">
+          <tr
+            v-for="run in runs"
+            :key="run.id"
+            :title="run.id"
+            class="run-row"
+            :class="{ selected: run.id === selectedRunId }"
+            @click="emit('select', run)"
+          >
             <td class="mono">{{ shortId(run.id) }}</td>
             <td>{{ run.engine }}</td>
             <td :title="run.scenarioName">{{ run.scenarioName }}</td>
@@ -59,7 +67,7 @@ function whenText(iso: string): string {
         </tbody>
       </table>
     </div>
-    <p class="dim hint">runId ≠ jobId; artifacts stay under /v1/jobs/{jobId}.</p>
+    <p class="dim hint">Click a run for metrics · runId ≠ jobId.</p>
   </section>
 </template>
 
@@ -91,6 +99,18 @@ h2 {
 .scroll {
   overflow: auto;
   min-height: 0;
+}
+
+.run-row {
+  cursor: pointer;
+}
+
+.run-row:hover {
+  background: rgba(79, 140, 255, 0.08);
+}
+
+.run-row.selected {
+  background: rgba(79, 140, 255, 0.16);
 }
 
 .state[data-state='succeeded'] {
