@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "api_support.hpp"
+#include "runs_store.hpp"
 
 #ifndef AV_VERSION
 #define AV_VERSION "0.0.0"
@@ -49,10 +50,12 @@ bool wantsSync(const crow::request& req) {
 // Polls JobManager and fans out job.* events to /v1/events subscribers.
 // Polling keeps av_sim free of transport concerns; 100 ms matches the
 // "ProgressFn throttled to ≤10 Hz → WS broadcasts" contract in ARCHITECTURE.
+// Also appends a Run record on terminal so the history matches WS-visible
+// events (P2e); GET /v1/runs reconciles again to cover the submit/terminal race.
 class JobWatcher {
  public:
-  JobWatcher(av::JobManager& jobs, av::api::EventHub& hub)
-      : m_jobs(jobs), m_hub(hub) {}
+  JobWatcher(av::JobManager& jobs, av::api::EventHub& hub, av::api::RunsStore& runs)
+      : m_jobs(jobs), m_hub(hub), m_runs(runs) {}
 
   ~JobWatcher() { stop(); }
 
@@ -85,6 +88,11 @@ class JobWatcher {
             prev.stage != status.progress.stage;
 
         if (stateChanged && av::isTerminal(status.state)) {
+          // History is append-on-terminal (P2e); GET /v1/runs reconciles
+          // again so a fast job is visible even before this poll tick.
+          m_runs.noteTerminal(
+              status.id, av::api::jobStateName(status.state),
+              status.finishedAt.value_or(std::chrono::system_clock::now()));
           publishTerminal(status);
         } else if (progressChanged && !av::isTerminal(status.state)) {
           m_hub.publish("job.progress", status.id,
@@ -126,9 +134,23 @@ class JobWatcher {
 
   av::JobManager& m_jobs;
   av::api::EventHub& m_hub;
+  av::api::RunsStore& m_runs;
   std::atomic<bool> m_stop{false};
   std::thread m_thread;
 };
+
+// Folds terminal jobs into the runs store (idempotent). Called from the
+// /v1/runs handlers so history is complete even if a job finished between
+// the watcher's polls or the watcher is not the one that saw the transition.
+void reconcileRuns(const av::JobManager& jobs, av::api::RunsStore& runs) {
+  for (const av::JobStatus& status : jobs.list()) {
+    if (av::isTerminal(status.state)) {
+      runs.noteTerminal(
+          status.id, av::api::jobStateName(status.state),
+          status.finishedAt.value_or(std::chrono::system_clock::now()));
+    }
+  }
+}
 
 std::string joinErrors(const std::vector<std::string>& errors) {
   std::string out;
@@ -142,7 +164,7 @@ std::string joinErrors(const std::vector<std::string>& errors) {
 }
 
 void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
-                    av::api::EventHub& hub) {
+                    av::api::EventHub& hub, av::api::RunsStore& runs) {
   CROW_ROUTE(app, "/v1/health").methods(crow::HTTPMethod::Get)([] {
     nlohmann::json engines = nlohmann::json::array();
     for (const av::EngineDescriptor& desc :
@@ -173,7 +195,7 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
   });
 
   CROW_ROUTE(app, "/v1/simulations").methods(crow::HTTPMethod::Post)(
-      [&jobs](const crow::request& req) {
+      [&jobs, &runs](const crow::request& req) {
         nlohmann::json body;
         try {
           body = nlohmann::json::parse(req.body);
@@ -209,7 +231,13 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
                             joinErrors(validation.errors));
         }
 
+        // Snapshot run metadata before the scenario moves into the job.
+        const std::string runEngine = scenario.params.engine;
+        const std::string runName = scenario.name;
+        const nlohmann::json runDigest = av::api::paramsDigestOf(scenario.params);
         const av::JobId id = jobs.submit(std::move(scenario));
+        runs.noteSubmitted(id, runEngine, runName, runDigest,
+                           std::chrono::system_clock::now());
         if (!wantsSync(req)) {
           nlohmann::json out;
           out["jobId"] = id;
@@ -223,10 +251,40 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
               status.has_value() ? status->error : "job disappeared";
           return problemRes(500, "simulation failed", detail);
         }
+        // Sync runs are terminal by the time we answer; fold into history now
+        // so GET /v1/runs sees them without waiting for the watcher tick.
+        runs.noteTerminal(
+            id, av::api::jobStateName(status->state),
+            status->finishedAt.value_or(std::chrono::system_clock::now()));
         nlohmann::json out = av::resultToJson(*status->result);
         out["jobId"] = id;
         out["state"] = av::api::jobStateName(status->state);
         return jsonRes(200, out);
+      });
+
+  CROW_ROUTE(app, "/v1/runs").methods(crow::HTTPMethod::Get)(
+      [&jobs, &runs](const crow::request& req) {
+        reconcileRuns(jobs, runs);
+        std::optional<std::string> engineFilter;
+        if (const char* engine = req.url_params.get("engine");
+            engine != nullptr && *engine != '\0') {
+          engineFilter = std::string(engine);
+        }
+        nlohmann::json body = nlohmann::json::array();
+        for (const av::api::RunRecord& run : runs.list(engineFilter)) {
+          body.push_back(av::api::runSummaryJson(run));
+        }
+        return jsonRes(200, body);
+      });
+
+  CROW_ROUTE(app, "/v1/runs/<str>").methods(crow::HTTPMethod::Get)(
+      [&jobs, &runs](const std::string& id) {
+        reconcileRuns(jobs, runs);
+        const std::optional<av::api::RunRecord> run = runs.get(id);
+        if (!run.has_value()) {
+          return problemRes(404, "run not found", id);
+        }
+        return jsonRes(200, av::api::runToJson(*run));
       });
 
   CROW_ROUTE(app, "/v1/jobs/<str>").methods(crow::HTTPMethod::Get)(
@@ -353,10 +411,11 @@ int main(int argc, char** argv) {
 
   av::JobManager jobs;
   av::api::EventHub hub;
-  JobWatcher watcher(jobs, hub);
+  av::api::RunsStore runs;
+  JobWatcher watcher(jobs, hub, runs);
 
   crow::SimpleApp app;
-  registerRoutes(app, jobs, hub);
+  registerRoutes(app, jobs, hub, runs);
   watcher.start();
 
   std::cout << "av-api listening on http://" << bindAddr << ':' << port

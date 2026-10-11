@@ -44,6 +44,7 @@ endif()
 add_executable(av-api
   main.cpp
   api_support.cpp
+  runs_store.cpp
 )
 
 target_include_directories(av-api PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

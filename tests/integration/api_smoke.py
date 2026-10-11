@@ -254,6 +254,44 @@ def main():
         expect("ir" in job_result, "async result has ir summary")
         print("ok: async result")
 
+        # P2e: runs history — every terminal job lands in GET /v1/runs.
+        status, runs = http("GET", f"{base}/v1/runs")
+        expect(status == 200 and isinstance(runs, list), f"GET /v1/runs: {status} {runs}")
+        run_ids = [r.get("id") for r in runs]
+        expect(job_id in run_ids, f"sync run recorded: {run_ids}")
+        expect(async_id in run_ids, f"async run recorded: {run_ids}")
+        for r in runs:
+            expect(r.get("id") == r.get("jobId"), f"run id==jobId: {r}")
+            expect(r.get("state") in ("succeeded", "failed", "cancelled"), f"run state: {r}")
+            expect(r.get("engine") == scenario["params"]["engine"], f"run engine: {r}")
+            expect(r.get("scenarioName") == scenario.get("name"), f"run scenarioName: {r}")
+            expect("submittedAt" in r and "finishedAt" in r, f"run timestamps: {r}")
+            expect(isinstance(r.get("paramsDigest"), dict) and "engine" in r["paramsDigest"],
+                   f"run paramsDigest: {r}")
+        expect(runs[0]["finishedAt"] >= runs[-1]["finishedAt"],
+               f"runs newest first: {[r['finishedAt'] for r in runs]}")
+        print(f"ok: runs list ({len(runs)} recorded)")
+
+        engine_name = scenario["params"]["engine"]
+        status, filtered = http("GET", f"{base}/v1/runs?engine={engine_name}")
+        expect(status == 200 and filtered, f"runs engine filter: {status} {filtered}")
+        expect(all(r["engine"] == engine_name for r in filtered), f"filter contents: {filtered}")
+        status, none_runs = http("GET", f"{base}/v1/runs?engine=no-such-engine")
+        expect(status == 200 and none_runs == [], f"filter miss: {status} {none_runs}")
+        print("ok: runs engine filter")
+
+        status, run = http("GET", f"{base}/v1/runs/{async_id}")
+        expect(status == 200, f"GET /v1/runs/{{id}}: {status} {run}")
+        expect(run.get("id") == async_id and run.get("jobId") == async_id, f"run detail ids: {run}")
+        expect(run.get("state") == "succeeded", f"run detail state: {run}")
+        links = run.get("links", {})
+        expect(links.get("result") == f"/v1/jobs/{async_id}/result", f"run links result: {links}")
+        expect(links.get("ir") == f"/v1/jobs/{async_id}/ir.wav", f"run links ir: {links}")
+        expect(links.get("field") == f"/v1/jobs/{async_id}/field", f"run links field: {links}")
+        status, body = http("GET", f"{base}/v1/runs/nope")
+        expect(status == 404 and body.get("status") == 404, f"run 404: {status} {body}")
+        print("ok: run detail + 404")
+
         # P2c: mesh room with loadedMesh filled at the API boundary completes.
         if mesh_scenario is not None:
             status, accepted = http("POST", f"{base}/v1/simulations", mesh_scenario)
@@ -333,6 +371,15 @@ def main():
         expect(status == 409, f"re-cancel should be 409: {status} {body}")
         expect(body.get("status") == 409 and "title" in body and "detail" in body, f"problem shape: {body}")
         print(f"ok: cancel smoke (final state {st['state']})")
+
+        # Cancelled (or late-succeeded) jobs are terminal — history keeps them.
+        status, runs = http("GET", f"{base}/v1/runs")
+        expect(status == 200, f"runs after cancel: {status} {runs}")
+        heavy_runs = [r for r in runs if r.get("id") == heavy_id]
+        expect(len(heavy_runs) == 1, f"heavy run recorded: {runs}")
+        expect(heavy_runs[0]["state"] in ("cancelled", "succeeded"),
+               f"heavy run state: {heavy_runs[0]}")
+        print("ok: terminal non-success run in history")
 
         status, body = http("POST", f"{base}/v1/jobs/nope/cancel")
         expect(status == 404 and body.get("status") == 404, f"cancel unknown: {status} {body}")

@@ -137,6 +137,8 @@ JSON-документ (`schemas/scenario.schema.json`):
 
 Один **run** = scenario + engine + params + Result. История — список runs по сцене (без сложного Study/diff в v1). UI может показать два run’а рядом глазами.
 
+Запись run (P2e): `id` = `jobId` (один handle), engine, scenarioName, sceneVersion (может отсутствовать), submittedAt/finishedAt, state, paramsDigest (engine + ключевые sim-параметры). Все терминальные job'ы (включая failed/cancelled) попадают в историю.
+
 ## 6. API (контракт для GUI)
 
 - Base: `http://localhost:8787/v1`
@@ -151,7 +153,8 @@ JSON-документ (`schemas/scenario.schema.json`):
 | GET | `/v1/source-catalog` | built-in каталог приборов (мощность, АЧХ, directivity) |
 | POST | `/v1/rooms/import` | OBJ/glTF → room |
 | POST | `/v1/simulations` | запуск → job (WS progress) или `?sync=1` |
-| GET | `/v1/runs` | **история запусков** |
+| GET | `/v1/runs` | **история запусков** (новые сверху; фильтр `?engine=`) |
+| GET | `/v1/runs/{runId}` | один run + ссылки на result/ir/field (`runId` = `jobId`) |
 | GET | `/v1/simulations/{id}/ir` \| `/metrics` \| `/paths` \| `/field` | артефакты |
 | GET | `/v1/jobs/{id}` · POST `/v1/jobs/{id}/cancel` | async lifecycle |
 | GET | `/v1/bands` | сетка частот |

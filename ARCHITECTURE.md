@@ -167,6 +167,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - A **run** = scenario snapshot + engine + params + result id.
 - v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
 - **P1 handle simplification:** `jobId` doubles as simulation/result id (`GET /v1/jobs/{id}/result`, `/ir.wav`); WS `simulationId = jobId`. Split stores later without changing handle format.
+- **P2e run record** (in-memory, append on terminal — all terminal states): `id` = `jobId` (same value in both fields), `engine`, `scenarioName`, `sceneVersion` (optional until Scene Store), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first; `GET /v1/runs/{runId}` adds `links` to `result` / `ir.wav` / `field`.
 
 ### scene store + interactive patches
 - Backend owns the **Scene Store** (full scenario state, `sceneVersion`).
@@ -217,16 +218,16 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 | POST | `/v1/rooms/import` | multipart: OBJ/glTF (+ options: scale, unit, name) → room |
 | GET/POST | `/v1/sources` | list / create source (pos, orientation, power, АЧХ, directivity) |
 | GET | `/v1/source-catalog` | built-in device catalog (specs as-is, no warranty) |
-| GET | `/v1/runs` | run history for scenes |
+| GET | `/v1/runs` | run history (newest first; `?engine=` filter) |
+| GET | `/v1/runs/{runId}` | one run + links to result/ir/field (P2e: `runId` = `jobId`) |
 | GET/POST | `/v1/receivers` | list / create receiver (pos) |
 | GET/POST | `/v1/scenarios` | list / create full scenario (refs + params) |
 | GET/PATCH/DELETE | `/v1/scenarios/{id}` | read / update / delete |
 | GET | `/v1/scenarios/{id}/validate` | dry-run: mesh/material/engine checks |
 | POST | `/v1/simulations` | run scenario → `{jobId}` (async) or `?sync=1` → result |
-| GET | `/v1/simulations/{id}` | result summary + links to artifacts |
-| GET | `/v1/simulations/{id}/ir` | IR artifact (WAV binary or JSON samples `?format=json`) |
-| GET | `/v1/simulations/{id}/metrics` | RT60/EDT/early-reflections JSON |
-| GET | `/v1/simulations/{id}/field` | spatial field grid (progressive chunks) |
+| GET | `/v1/jobs/{id}/result` | result summary + metrics (P1: jobId = simulation handle) |
+| GET | `/v1/jobs/{id}/ir.wav` | IR artifact (WAV binary) |
+| GET | `/v1/jobs/{id}/field` | spatial field grid JSON |
 | GET | `/v1/jobs/{id}` | job status/progress/error |
 | POST | `/v1/jobs/{id}/cancel` | request cancellation |
 | GET | `/v1/bands` | frequency band convention in use |
