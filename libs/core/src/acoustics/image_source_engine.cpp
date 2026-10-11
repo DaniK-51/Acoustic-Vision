@@ -5,6 +5,8 @@
 #include <array>
 #include <cmath>
 
+#include "rt_core.hpp"
+
 namespace av {
 namespace {
 
@@ -227,13 +229,7 @@ class ImageSourceEngine : public IEngine {
     Metrics metrics;
     // IR-derived metrics are broadband (channel 0); analytic Sabine/Eyring
     // are per band from area-weighted mean absorption.
-    if (pairCount > 0) {
-      const std::span<const float> firstChannel(ir.samples.data(), sampleCount);
-      metrics.rt60[0.0].schroederT30 = schroederT30(firstChannel, ir.sampleRate);
-      metrics.edt[0.0] = edt(firstChannel, ir.sampleRate);
-      metrics.earlyReflections =
-          earlyReflections(firstChannel, ir.sampleRate, 8, 0.080);
-    }
+    rtcore::addIrDerivedMetrics(ir, metrics);
     const std::map<double, Rt60> analytic =
         analyticRt60(room, scenario, params.bandsHz, speedOfSound);
     for (const auto& [band, rt] : analytic) {

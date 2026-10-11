@@ -1,9 +1,11 @@
 #pragma once
 
-// Internal shared core for the stochastic mesh RT engines (ray-tracing,
-// hybrid): sphere sampling, BVH specular bounce, energy deposit, cancel and
-// progress. Lives beside the engine TUs and is *not* part of the public
-// engine contract (docs/engines.md section 1) — do not include outside av_core.
+// Internal shared core for the mesh engines (ray-tracing, hybrid): sphere
+// sampling, BVH specular bounce, energy deposit, cancel and progress, plus
+// the validate() and post-run metrics assembly those engines share (the
+// IR-derived metrics helper is also used by image-source). Lives beside the
+// engine TUs and is *not* part of the public engine contract
+// (docs/engines.md section 1) — do not include outside av_core.
 
 #include <cstddef>
 #include <cstdint>
@@ -85,5 +87,26 @@ using ReceiverHitFn =
 // Monte Carlo mean over rays, additionally per cell volume so the stored
 // value is an energy *density* (linear, not dB).
 void normalizeFieldEnergy(SpatialField& field, std::size_t totalRays);
+
+// --- Shared engine-side assembly ---
+
+// Scenario gate for the mesh RT engines (ray-tracing, hybrid). `engineId`
+// only prefixes the engine-specific error strings; the remaining checks
+// (loaded mesh, sources/receivers, material-slot warnings, signedIr,
+// fieldGrid) are identical for both.
+[[nodiscard]] ValidateResult validateMeshRtScenario(const Scenario& scenario,
+                                                    const std::string& engineId);
+
+// Broadband IR-derived metrics from channel 0: schroederT30 + edt at band
+// key 0.0 and early-reflection peaks (8 peaks, 80 ms window). No-op when the
+// IR has no channels.
+void addIrDerivedMetrics(const IrBuffer& ir, Metrics& metrics);
+
+// Per-band analytic Sabine/Eyring over the mesh shell (area-weighted alpha
+// at each band). bandsHz empty => kDefaultBandsHz. Writes the whole Rt60
+// entry per band (schroederT30 stays 0), matching the pre-existing engines.
+void addMeshAnalyticRt60(const Scenario& scenario, const Mesh& mesh,
+                         const std::vector<double>& bandsHz,
+                         double speedOfSound, Metrics& metrics);
 
 }  // namespace av::rtcore

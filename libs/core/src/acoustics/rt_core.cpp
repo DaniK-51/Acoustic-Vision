@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <span>
 #include <utility>
 
 #include <av/materials/material.hpp>
@@ -264,6 +265,92 @@ void normalizeFieldEnergy(SpatialField& field, std::size_t totalRays) {
   const double inv = 1.0 / (static_cast<double>(totalRays) * cellVolume);
   for (float& value : field.values) {
     value *= static_cast<float>(inv);
+  }
+}
+
+ValidateResult validateMeshRtScenario(const Scenario& scenario,
+                                      const std::string& engineId) {
+  ValidateResult result;
+  if (scenario.room.type != Room::Type::Mesh) {
+    result.errors.emplace_back(engineId + " supports mesh rooms only");
+    result.ok = false;
+    return result;
+  }
+  if (scenario.loadedMesh == nullptr) {
+    result.errors.emplace_back(engineId +
+                               " requires an in-memory mesh "
+                               "(Scenario::loadedMesh)");
+  } else if (scenario.loadedMesh->triangles.empty() ||
+             scenario.loadedMesh->positions.empty()) {
+    result.errors.emplace_back("loaded mesh has no geometry");
+  }
+  if (scenario.sources.empty()) {
+    result.errors.emplace_back(engineId + " requires at least one source");
+  }
+  if (scenario.receivers.empty()) {
+    result.errors.emplace_back(engineId + " requires at least one receiver");
+  }
+  if (scenario.loadedMesh != nullptr) {
+    for (const std::string& slot : scenario.loadedMesh->materialSlots) {
+      const std::string id = materialIdForSlot(scenario, slot);
+      if (findMaterial(scenario, id) == nullptr) {
+        result.warnings.push_back("no resolvable material for mesh slot '" +
+                                  slot + "' (treated as alpha=0)");
+      }
+    }
+  }
+  if (scenario.params.signedIr) {
+    result.warnings.emplace_back(
+        "signedIr is not produced; output is an unsigned energy envelope");
+  }
+  if (scenario.params.fieldGrid.enabled) {
+    const FieldGridParams& grid = scenario.params.fieldGrid;
+    if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0) {
+      result.errors.emplace_back("fieldGrid requires positive nx, ny, nz");
+    } else if (grid.nx > kMaxFieldDim || grid.ny > kMaxFieldDim ||
+               grid.nz > kMaxFieldDim) {
+      result.warnings.emplace_back(
+          "fieldGrid dims exceed kMaxFieldDim (" +
+          std::to_string(kMaxFieldDim) + "); values will be clamped");
+    }
+  }
+  result.ok = result.errors.empty();
+  return result;
+}
+
+void addIrDerivedMetrics(const IrBuffer& ir, Metrics& metrics) {
+  if (ir.channels == 0 || ir.samples.empty()) {
+    return;
+  }
+  const std::size_t sampleCount = ir.samples.size() / ir.channels;
+  const std::span<const float> firstChannel(ir.samples.data(), sampleCount);
+  metrics.rt60[0.0].schroederT30 = schroederT30(firstChannel, ir.sampleRate);
+  metrics.edt[0.0] = edt(firstChannel, ir.sampleRate);
+  metrics.earlyReflections =
+      earlyReflections(firstChannel, ir.sampleRate, 8, 0.080);
+}
+
+void addMeshAnalyticRt60(const Scenario& scenario, const Mesh& mesh,
+                         const std::vector<double>& bandsHz,
+                         double speedOfSound, Metrics& metrics) {
+  const double area = surfaceArea(mesh);
+  const double volume = meshVolume(mesh);
+  std::vector<double> bands = bandsHz;
+  if (bands.empty()) {
+    bands.assign(kDefaultBandsHz.begin(), kDefaultBandsHz.end());
+  }
+  for (double band : bands) {
+    double weighted = 0.0;
+    for (std::size_t i = 0; i < mesh.triangles.size(); ++i) {
+      weighted += triangleArea(mesh, mesh.triangles[i]) *
+                  slotAlphaAtBand(scenario, mesh, static_cast<std::uint32_t>(i),
+                                  band);
+    }
+    const double meanAlpha = area > 0.0 ? weighted / area : 0.0;
+    Rt60 rt60;
+    rt60.sabine = sabineRt60(volume, area, meanAlpha, speedOfSound);
+    rt60.eyring = eyringRt60(volume, area, meanAlpha, speedOfSound);
+    metrics.rt60[band] = rt60;
   }
 }
 
