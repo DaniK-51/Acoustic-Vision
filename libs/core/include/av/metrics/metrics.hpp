@@ -46,7 +46,20 @@ struct IrBuffer {
 
 // Artifact placeholders; shapes land with the producing engines (P0-P2).
 struct SpatialField {};
-struct RayPaths {};
+
+// One traced ray path in world space: source position then successive wall
+// hits. amplitude is the bounce-factor amplitude (prod sqrt(1-alpha), without
+// geometric 1/r); order is the wall-hit count along the path.
+struct RayPolyline {
+  std::vector<Vec3> points;
+  double amplitude = 0.0;
+  int order = 0;
+};
+
+struct RayPaths {
+  std::vector<RayPolyline> paths;
+};
+
 struct Findings {};
 
 // --- IR-derived metrics (input: one channel of an unsigned energy envelope) ---

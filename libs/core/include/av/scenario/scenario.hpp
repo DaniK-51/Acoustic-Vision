@@ -1,12 +1,14 @@
 #pragma once
 
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
+#include <av/geometry/mesh.hpp>
 #include <av/geometry/vec3.hpp>
 #include <av/materials/material.hpp>
 #include <av/units.hpp>
@@ -68,6 +70,10 @@ struct Scenario {
   std::vector<Source> sources;
   std::vector<Receiver> receivers;
   SimParams params;
+  // Runtime-only mesh for mesh rooms: the caller loads room.mesh.uri and hands
+  // the geometry to engines here. Not serialized to scenario JSON (the uri
+  // stays the on-disk reference); filled by JobManager/CLI/API in P2c.
+  std::shared_ptr<const Mesh> loadedMesh;
 };
 
 struct RectFace {
