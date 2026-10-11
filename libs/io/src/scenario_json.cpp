@@ -1,47 +1,20 @@
 #include <av/io/io.hpp>
 
 #include <fstream>
-#include <map>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+#include "json_common.hpp"
 
 namespace av {
 namespace {
 
-nlohmann::json vec3ToJson(const Vec3& v) {
-  return nlohmann::json::array({v.x, v.y, v.z});
-}
-
-Vec3 vec3FromJson(const nlohmann::json& json) {
-  if (!json.is_array() || json.size() != 3) {
-    throw std::runtime_error("expected a [x, y, z] array");
-  }
-  return Vec3{json.at(0).get<double>(), json.at(1).get<double>(),
-              json.at(2).get<double>()};
-}
-
-nlohmann::json stringMapToJson(const std::map<std::string, std::string>& map) {
-  nlohmann::json json = nlohmann::json::object();
-  for (const auto& [key, value] : map) {
-    json[key] = value;
-  }
-  return json;
-}
-
-std::map<std::string, std::string> stringMapFromJson(const nlohmann::json& json) {
-  std::map<std::string, std::string> map;
-  if (json.is_null()) {
-    return map;
-  }
-  if (!json.is_object()) {
-    throw std::runtime_error("expected an object of string values");
-  }
-  for (const auto& [key, value] : json.items()) {
-    map[key] = value.get<std::string>();
-  }
-  return map;
-}
+using detail::stringMapFromJson;
+using detail::stringMapToJson;
+using detail::vec3FromJson;
+using detail::vec3ToJson;
 
 nlohmann::json materialToJson(const Material& material) {
   nlohmann::json json;

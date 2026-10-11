@@ -10,6 +10,17 @@
 #include "import_common.hpp"
 
 namespace av {
+namespace {
+
+// Shared tail of loadMeshRoom / fillLoadedMesh: format dispatch with the
+// room's unit/scale, then its materialOverrides. Callers resolve the uri.
+Mesh loadMeshForRoom(const std::filesystem::path& path, const MeshRoom& room) {
+  Mesh mesh = loadMesh(path, room.unit, room.scale);
+  applyMaterialOverrides(mesh, room.materialOverrides);
+  return mesh;
+}
+
+}  // namespace
 
 void applyMaterialOverrides(
     Mesh& mesh, const std::map<std::string, std::string>& overrides) {
@@ -36,9 +47,7 @@ Mesh loadMesh(const std::filesystem::path& path, const std::string& unit,
 }
 
 Mesh loadMeshRoom(const MeshRoom& room) {
-  Mesh mesh = loadMesh(detail::resolveMeshUri(room.uri), room.unit, room.scale);
-  applyMaterialOverrides(mesh, room.materialOverrides);
-  return mesh;
+  return loadMeshForRoom(detail::resolveMeshUri(room.uri), room);
 }
 
 void fillLoadedMesh(Scenario& scenario, const std::filesystem::path& baseDir) {
@@ -56,11 +65,10 @@ void fillLoadedMesh(Scenario& scenario, const std::filesystem::path& baseDir) {
   const std::filesystem::path path = detail::resolveMeshUri(uri, baseDir);
 
   try {
-    Mesh mesh = loadMesh(path, scenario.room.mesh.unit, scenario.room.mesh.scale);
+    Mesh mesh = loadMeshForRoom(path, scenario.room.mesh);
     if (mesh.triangles.empty() || mesh.positions.empty()) {
       throw std::runtime_error("mesh has no geometry");
     }
-    applyMaterialOverrides(mesh, scenario.room.mesh.materialOverrides);
     scenario.loadedMesh =
         std::make_shared<const Mesh>(std::move(mesh));
   } catch (const std::exception& error) {

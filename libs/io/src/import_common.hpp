@@ -7,7 +7,7 @@
 namespace av::detail {
 
 // SI meters at import (AGENTS.md decision 14: convert only on import).
-// Shared by every mesh importer so OBJ and glTF cannot drift apart.
+// Unit table shared by every mesh importer so OBJ and glTF cannot drift apart.
 inline double unitToMeters(const std::string& unit) {
   if (unit == "m") {
     return 1.0;
@@ -24,10 +24,23 @@ inline double unitToMeters(const std::string& unit) {
   throw std::runtime_error("unknown mesh unit: " + unit);
 }
 
-// file:///C:/... leaves a leading slash before the Windows drive; strip the
-// scheme and that slash so the result is a plain filesystem path.
-// Shared by loadMeshRoom and fillLoadedMesh (ADR 36 URI policy).
-inline std::filesystem::path meshUriToPath(const std::string& uri) {
+// unitToMeters(unit) * scale. Validates scale first so OBJ and glTF reject
+// bad input in the same order with the same message.
+inline double applyUnitScale(const std::string& unit, double scale) {
+  if (!(scale > 0.0)) {
+    throw std::runtime_error("mesh scale must be > 0");
+  }
+  return unitToMeters(unit) * scale;
+}
+
+// uri -> filesystem path, relative paths joined with `baseDir` when non-empty
+// (CLI passes the scenario directory, API the CWD). Absolute paths and an
+// empty baseDir leave the result as parsed. file:///C:/... leaves a leading
+// slash before the Windows drive; strip the scheme and that slash so the
+// result is a plain filesystem path (ADR 36 URI policy). Single mesh-uri
+// entry point: loadMeshRoom and fillLoadedMesh resolve only here.
+inline std::filesystem::path resolveMeshUri(
+    const std::string& uri, const std::filesystem::path& baseDir = {}) {
   std::string value = uri;
   if (value.rfind("file://", 0) == 0) {
     value = value.substr(7);
@@ -35,15 +48,7 @@ inline std::filesystem::path meshUriToPath(const std::string& uri) {
       value = value.substr(1);
     }
   }
-  return std::filesystem::path(value);
-}
-
-// uri -> filesystem path, relative paths joined with `baseDir` when non-empty
-// (CLI passes the scenario directory, API the CWD). Absolute paths and
-// empty baseDir leave the result as meshUriToPath would produce.
-inline std::filesystem::path resolveMeshUri(
-    const std::string& uri, const std::filesystem::path& baseDir = {}) {
-  std::filesystem::path path = meshUriToPath(uri);
+  std::filesystem::path path(value);
   if (path.is_relative() && !baseDir.empty()) {
     path = baseDir / path;
   }

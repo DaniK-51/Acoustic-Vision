@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <string>
 
+#include "json_common.hpp"
+
 namespace av {
 namespace {
 
@@ -77,8 +79,7 @@ nlohmann::json fieldToJson(const SpatialField& field) {
   json["nx"] = field.nx;
   json["ny"] = field.ny;
   json["nz"] = field.nz;
-  json["origin"] = nlohmann::json::array({field.origin.x, field.origin.y,
-                                          field.origin.z});
+  json["origin"] = detail::vec3ToJson(field.origin);
   json["cellSize"] = field.cellSize;
   json["bandHz"] = field.bandHz;
   json["unit"] = field.unit;

@@ -32,10 +32,7 @@ std::string zoneNameForFace(const tinyobj::shape_t& shape,
 
 Mesh loadObj(const std::filesystem::path& path, const std::string& unit,
              double scale) {
-  if (!(scale > 0.0)) {
-    throw std::runtime_error("mesh scale must be > 0");
-  }
-  const double toMeters = detail::unitToMeters(unit) * scale;
+  const double toMeters = detail::applyUnitScale(unit, scale);
 
   tinyobj::ObjReaderConfig config;
   config.triangulate = true;

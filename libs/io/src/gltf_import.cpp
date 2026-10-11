@@ -135,10 +135,7 @@ std::uint32_t readIndex(const tinygltf::Model& model,
 
 Mesh loadGltf(const std::filesystem::path& path, const std::string& unit,
               double scale) {
-  if (!(scale > 0.0)) {
-    throw std::runtime_error("mesh scale must be > 0");
-  }
-  const double toMeters = detail::unitToMeters(unit) * scale;
+  const double toMeters = detail::applyUnitScale(unit, scale);
 
   tinygltf::Model model;
   tinygltf::TinyGLTF loader;
