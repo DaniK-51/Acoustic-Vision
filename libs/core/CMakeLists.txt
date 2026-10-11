@@ -9,6 +9,7 @@ add_library(av_core
   src/acoustics/sabine_eyring_engine.cpp
   src/acoustics/image_source_engine.cpp
   src/acoustics/ray_tracing_engine.cpp
+  src/acoustics/hybrid_engine.cpp
 )
 
 add_library(av::core ALIAS av_core)

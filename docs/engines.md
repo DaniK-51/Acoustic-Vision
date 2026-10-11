@@ -84,6 +84,17 @@ REGISTER_ENGINE(ImageSourceEngine);
 | `hybrid` | ISM early + RT late | mesh | полное IR | P2 |
 | `fdtd` / моды | Волновое | small rect | LF-моды | later / plugin |
 
+**`hybrid` (P2g).** Один стохастический RT-проход на mesh (как `ray-tracing`);
+депозиты с `pathTime < earlyTimeSec` (по умолчанию 0.08 с) **или** порядком
+отражений ≤ `earlyOrder` (по умолчанию 2) идут в раннюю часть IR (плотный
+суб-сэмпл депозит), остальное — в позднюю; сумма — одно `IrBuffer`.
+Опционально `useSabineTail` заменяет позднюю часть аналитическим хвостом
+Сэбина. `methodParams`: `earlyTimeSec`, `earlyOrder`, `rayCount`,
+`maxBounces`, `seed`, `receiverRadius`, `useSabineTail`, `capturePathLimit`.
+Валидация требует mesh + `loadedMesh` (rect отклоняется). Артефакты:
+`metrics`, `ir`, `rays`, `field` (rays/field — как у `ray-tracing`, при
+capture/grid).
+
 ## 5. Физические конвенции (ISM)
 
 Не менять молча — это источник golden-тестов.

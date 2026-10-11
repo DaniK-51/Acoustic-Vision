@@ -7,11 +7,13 @@ namespace av {
 void forceLinkSabineEyringEngine();
 void forceLinkImageSourceEngine();
 void forceLinkRayTracingEngine();
+void forceLinkHybridEngine();
 
 void linkBuiltinEngines() {
   forceLinkSabineEyringEngine();
   forceLinkImageSourceEngine();
   forceLinkRayTracingEngine();
+  forceLinkHybridEngine();
 }
 
 }  // namespace av

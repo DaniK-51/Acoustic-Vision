@@ -18,6 +18,7 @@ add_executable(av_unit_tests
   unit/test_metrics.cpp
   unit/test_engines.cpp
   unit/test_ray_tracing.cpp
+  unit/test_hybrid.cpp
   unit/test_io.cpp
   unit/test_mesh.cpp
   unit/test_obj_import.cpp
