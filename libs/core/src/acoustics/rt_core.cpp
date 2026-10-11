@@ -318,6 +318,78 @@ ValidateResult validateMeshRtScenario(const Scenario& scenario,
   return result;
 }
 
+ValidateResult validateRectScenario(const Scenario& scenario,
+                                    const std::string& engineId) {
+  ValidateResult result;
+  if (scenario.room.type != Room::Type::Rect) {
+    result.errors.emplace_back(engineId + " supports rectangular rooms only");
+    result.ok = false;
+    return result;
+  }
+  const RectRoom& room = scenario.room.rect;
+  if (room.w <= 0.0 || room.h <= 0.0 || room.d <= 0.0) {
+    result.errors.emplace_back("rect room must have positive size");
+  }
+  for (const RectFace& face : rectFaces(room)) {
+    if (face.materialId.empty() ||
+        findMaterial(scenario, face.materialId) == nullptr) {
+      result.errors.push_back("face '" + face.name +
+                              "' has no resolvable material");
+    }
+  }
+  result.ok = result.errors.empty();
+  return result;
+}
+
+std::optional<RtRunSetup> prepareRtRun(const Scenario& scenario,
+                                       const SimParams& params) {
+  const Mesh* mesh = scenario.loadedMesh.get();
+  if (mesh == nullptr || mesh->triangles.empty() ||
+      mesh->positions.empty()) {
+    return std::nullopt;
+  }
+  const double speedOfSound = params.speedOfSound;
+  const int sampleRate = params.sampleRate;
+  const std::size_t sampleCount = static_cast<std::size_t>(
+      std::llround(params.durationSec * static_cast<double>(sampleRate)));
+  if (sampleRate <= 0 || sampleCount == 0 || speedOfSound <= 0.0) {
+    return std::nullopt;
+  }
+
+  RtRunSetup setup;
+  setup.mesh = mesh;
+  setup.speedOfSound = speedOfSound;
+  setup.sampleRate = sampleRate;
+  setup.sampleCount = sampleCount;
+
+  // Optional spatial field: cubic grid over the mesh AABB, filled by
+  // depositing ray path energy during tracing.
+  setup.wantField = params.fieldGrid.enabled && params.fieldGrid.nx > 0 &&
+                    params.fieldGrid.ny > 0 && params.fieldGrid.nz > 0;
+  if (setup.wantField) {
+    setup.field = makeFieldGrid(boundsOf(*mesh), params.fieldGrid.nx,
+                                params.fieldGrid.ny, params.fieldGrid.nz);
+    setup.wantField = setup.field.cellSize > 0.0;
+  }
+
+  setup.sourceCount = scenario.sources.size();
+  setup.receiverCount = scenario.receivers.size();
+  setup.pairCount = setup.sourceCount * setup.receiverCount;
+
+  setup.ir.sampleRate = static_cast<double>(sampleRate);
+  setup.ir.durationSec = params.durationSec;
+  setup.ir.channels = setup.pairCount;
+  setup.ir.bandsHz.clear();  // broadband, like image-source
+  setup.ir.samples.assign(setup.pairCount * sampleCount, 0.0F);
+  setup.ir.channelNames.reserve(setup.pairCount);
+  for (const Source& source : scenario.sources) {
+    for (const Receiver& receiver : scenario.receivers) {
+      setup.ir.channelNames.push_back(source.id + ":" + receiver.id);
+    }
+  }
+  return setup;
+}
+
 void addIrDerivedMetrics(const IrBuffer& ir, Metrics& metrics) {
   if (ir.channels == 0 || ir.samples.empty()) {
     return;
@@ -347,10 +419,11 @@ void addMeshAnalyticRt60(const Scenario& scenario, const Mesh& mesh,
                                   band);
     }
     const double meanAlpha = area > 0.0 ? weighted / area : 0.0;
-    Rt60 rt60;
-    rt60.sabine = sabineRt60(volume, area, meanAlpha, speedOfSound);
-    rt60.eyring = eyringRt60(volume, area, meanAlpha, speedOfSound);
-    metrics.rt60[band] = rt60;
+    // Field-wise assign: never clobber schroederT30 written by
+    // addIrDerivedMetrics when band key 0.0 is among bandsHz.
+    Rt60& entry = metrics.rt60[band];
+    entry.sabine = sabineRt60(volume, area, meanAlpha, speedOfSound);
+    entry.eyring = eyringRt60(volume, area, meanAlpha, speedOfSound);
   }
 }
 

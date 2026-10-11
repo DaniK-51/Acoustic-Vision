@@ -92,50 +92,25 @@ class HybridEngine : public IEngine {
     if (cancel.cancelled()) {
       return result;
     }
-    const Mesh* mesh = scenario.loadedMesh.get();
-    if (mesh == nullptr || mesh->triangles.empty() ||
-        mesh->positions.empty()) {
+    const auto setup = rtcore::prepareRtRun(scenario, params);
+    if (!setup) {
       return result;
     }
-    const double speedOfSound = params.speedOfSound;
-    const int sampleRate = params.sampleRate;
-    const std::size_t sampleCount = static_cast<std::size_t>(
-        std::llround(params.durationSec * static_cast<double>(sampleRate)));
-    if (sampleRate <= 0 || sampleCount == 0 || speedOfSound <= 0.0) {
-      return result;
-    }
+    const Mesh* mesh = setup->mesh;
+    const double speedOfSound = setup->speedOfSound;
+    const int sampleRate = setup->sampleRate;
+    const std::size_t sampleCount = setup->sampleCount;
 
     const HybridMethodParams hyb = parseMethodParams(params);
     const Bvh bvh(*mesh);
 
-    // Optional spatial field: cubic grid over the mesh AABB, filled by
-    // depositing ray path energy during tracing (same convention as
-    // ray-tracing).
-    SpatialField field;
-    bool wantField = params.fieldGrid.enabled && params.fieldGrid.nx > 0 &&
-                     params.fieldGrid.ny > 0 && params.fieldGrid.nz > 0;
-    if (wantField) {
-      field = makeFieldGrid(boundsOf(*mesh), params.fieldGrid.nx,
-                            params.fieldGrid.ny, params.fieldGrid.nz);
-      wantField = field.cellSize > 0.0;
-    }
+    SpatialField field = std::move(setup->field);
+    const bool wantField = setup->wantField;
 
-    const std::size_t sourceCount = scenario.sources.size();
-    const std::size_t receiverCount = scenario.receivers.size();
-    const std::size_t pairCount = sourceCount * receiverCount;
+    const std::size_t sourceCount = setup->sourceCount;
+    const std::size_t pairCount = setup->pairCount;
 
-    IrBuffer ir;
-    ir.sampleRate = static_cast<double>(sampleRate);
-    ir.durationSec = params.durationSec;
-    ir.channels = pairCount;
-    ir.bandsHz.clear();  // broadband, like image-source / ray-tracing
-    ir.samples.assign(pairCount * sampleCount, 0.0F);
-    ir.channelNames.reserve(pairCount);
-    for (const Source& source : scenario.sources) {
-      for (const Receiver& receiver : scenario.receivers) {
-        ir.channelNames.push_back(source.id + ":" + receiver.id);
-      }
-    }
+    IrBuffer ir = std::move(setup->ir);
 
     // Early and late deposits are accumulated separately and summed at the
     // end (early = discrete-dense arrivals, late = statistical tail).

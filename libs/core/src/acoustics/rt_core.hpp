@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <random>
 #include <string>
 
@@ -97,14 +98,42 @@ void normalizeFieldEnergy(SpatialField& field, std::size_t totalRays);
 [[nodiscard]] ValidateResult validateMeshRtScenario(const Scenario& scenario,
                                                     const std::string& engineId);
 
+// Scenario gate for the rect engines (image-source, sabine-eyring): room
+// type, positive size, resolvable face materials. `engineId` prefixes the
+// room-type error only; the other strings are shared verbatim. Source /
+// receiver / signedIr checks stay with the engines that need them.
+[[nodiscard]] ValidateResult validateRectScenario(const Scenario& scenario,
+                                                  const std::string& engineId);
+
+// Shared run() preamble for the mesh RT engines: mesh presence, sampleRate /
+// duration / speed-of-sound gates, optional field grid over the mesh AABB,
+// and a zeroed broadband IrBuffer with "src:rcv" channel names. nullopt =>
+// run() must return an empty Result.
+struct RtRunSetup {
+  const Mesh* mesh = nullptr;
+  double speedOfSound = 0.0;
+  int sampleRate = 0;
+  std::size_t sampleCount = 0;
+  std::size_t sourceCount = 0;
+  std::size_t receiverCount = 0;
+  std::size_t pairCount = 0;
+  SpatialField field;
+  bool wantField = false;
+  IrBuffer ir;
+};
+
+[[nodiscard]] std::optional<RtRunSetup> prepareRtRun(const Scenario& scenario,
+                                                     const SimParams& params);
+
 // Broadband IR-derived metrics from channel 0: schroederT30 + edt at band
 // key 0.0 and early-reflection peaks (8 peaks, 80 ms window). No-op when the
 // IR has no channels.
 void addIrDerivedMetrics(const IrBuffer& ir, Metrics& metrics);
 
 // Per-band analytic Sabine/Eyring over the mesh shell (area-weighted alpha
-// at each band). bandsHz empty => kDefaultBandsHz. Writes the whole Rt60
-// entry per band (schroederT30 stays 0), matching the pre-existing engines.
+// at each band). bandsHz empty => kDefaultBandsHz. Field-wise assign of
+// .sabine / .eyring only — schroederT30 / edt / earlyReflections from
+// addIrDerivedMetrics survive even when band key 0.0 is among bandsHz.
 void addMeshAnalyticRt60(const Scenario& scenario, const Mesh& mesh,
                          const std::vector<double>& bandsHz,
                          double speedOfSound, Metrics& metrics);

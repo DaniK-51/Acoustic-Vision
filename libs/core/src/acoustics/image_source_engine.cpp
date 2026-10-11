@@ -59,23 +59,11 @@ class ImageSourceEngine : public IEngine {
   }
 
   [[nodiscard]] ValidateResult validate(const Scenario& scenario) const override {
-    ValidateResult result;
+    ValidateResult result = rtcore::validateRectScenario(scenario, "image-source");
     if (scenario.room.type != Room::Type::Rect) {
-      result.errors.emplace_back("image-source supports rectangular rooms only");
-      result.ok = false;
       return result;
     }
     const RectRoom& room = scenario.room.rect;
-    if (room.w <= 0.0 || room.h <= 0.0 || room.d <= 0.0) {
-      result.errors.emplace_back("rect room must have positive size");
-    }
-    for (const RectFace& face : rectFaces(room)) {
-      if (face.materialId.empty() ||
-          findMaterial(scenario, face.materialId) == nullptr) {
-        result.errors.push_back("face '" + face.name +
-                                "' has no resolvable material");
-      }
-    }
     if (scenario.sources.empty()) {
       result.errors.emplace_back("image-source requires at least one source");
     }

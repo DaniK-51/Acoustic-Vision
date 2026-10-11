@@ -297,6 +297,37 @@ TEST(RayTracingEngine, AnalyticRt60MatchesHandValue) {
   EXPECT_NEAR(rt.eyring, av::eyringRt60(1.0, 6.0, 0.2), 1e-9);
 }
 
+TEST(RayTracingEngine, AnalyticMergePreservesSchroederWhenBandZeroRequested) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  // Band key 0.0 is both the IR-derived broadband slot and a requested
+  // analytic band: the merge must be field-wise (sabine/eyring only).
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  scenario.params.bandsHz = {0.0, 500.0};
+  scenario.params.methodParams["rayCount"] = 2000;
+
+  const av::Result result =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(result.metrics.has_value());
+  ASSERT_TRUE(result.ir.has_value());
+
+  const av::IrBuffer& ir = *result.ir;
+  const std::span<const float> channel(ir.samples.data(), ir.samples.size());
+  const double t30 = av::schroederT30(channel, ir.sampleRate);
+  EXPECT_GT(t30, 0.0);
+
+  const av::Rt60& rt0 = result.metrics->rt60.at(0.0);
+  EXPECT_NEAR(rt0.schroederT30, t30, 1e-12);
+  EXPECT_TRUE(std::isfinite(rt0.sabine));
+  EXPECT_GT(rt0.sabine, 0.0);
+  EXPECT_GT(rt0.eyring, 0.0);
+
+  const av::Rt60& rt500 = result.metrics->rt60.at(500.0);
+  EXPECT_GT(rt500.sabine, 0.0);
+}
+
 TEST(RayTracingEngine, CapturePathsNonempty) {
   av::linkBuiltinEngines();
   auto engine = av::EngineRegistry::instance().create("ray-tracing");
