@@ -9,9 +9,9 @@
 
 ## Стадия проекта
 
-**Открыт P0: core lib + Engine API + CLI.**
+**P0 delivered** (core + Engine API + sabine-eyring + image-source + av_io + av-cli). Next: **P1** (av_sim jobs + av-api REST/WS).
 
-Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать, пока не скажут. Новый scope — сначала зафиксировать в docs, потом код.
+Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать. Новый scope — сначала в docs, потом код.
 
 ## Источники истины
 
