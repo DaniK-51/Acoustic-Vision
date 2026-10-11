@@ -10,11 +10,22 @@ FetchContent_Declare(tinyobjloader
 )
 FetchContent_MakeAvailable(tinyobjloader)
 
+# tinygltf is header-only the same way (TINYGLTF_IMPLEMENTATION in one TU);
+# skip their CMake and the stb image deps via TINYGLTF_NO_STB_*.
+FetchContent_Declare(tinygltf
+  GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
+  GIT_TAG v2.9.3
+  SOURCE_SUBDIR unused-no-cmake-here
+)
+FetchContent_MakeAvailable(tinygltf)
+
 add_library(av_io
   src/scenario_json.cpp
   src/wav.cpp
   src/metrics_json.cpp
   src/obj_import.cpp
+  src/gltf_import.cpp
+  src/mesh_import.cpp
 )
 
 add_library(av::io ALIAS av_io)
@@ -34,5 +45,7 @@ target_link_libraries(av_io
 )
 
 target_include_directories(av_io PRIVATE "${tinyobjloader_SOURCE_DIR}")
+# SYSTEM keeps tinygltf warnings out of -Wall -Wextra on our TUs.
+target_include_directories(av_io SYSTEM PRIVATE "${tinygltf_SOURCE_DIR}")
 
 av_set_warnings(av_io)

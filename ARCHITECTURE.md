@@ -183,7 +183,7 @@ Engines declare which artifact kinds they produce (`EngineDescriptor.artifacts`)
 GUI renders only advertised kinds. Long jobs (minutes–hours, GPU/CPU) are first-class: progress, cancel, job timeouts.
 
 ### IO
-- Import: **OBJ** (tinyobjloader), **glTF/GLB** (tinygltf) → `Mesh` + material slots. Scale/unit flag (`meters` default, `mm/cm/in` convert on import).
+- Import: **OBJ** (tinyobjloader), **glTF/GLB** (tinygltf) → `Mesh` + material slots. Dispatch by extension; glTF importer reads triangle primitives (POSITION required). Scale/unit flag (`meters` default, `mm/cm/in` convert on import).
 - Export: scenario JSON (nlohmann), IR WAV/CSV, metrics JSON.
 - Scenario (de)serialization ↔ `schemas/*.schema.json` — validate in tests and at API boundary.
 

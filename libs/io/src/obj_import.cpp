@@ -3,30 +3,15 @@
 #include <map>
 #include <stdexcept>
 #include <string>
-#include <utility>
+#include <vector>
+
+#include "import_common.hpp"
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
 namespace av {
 namespace {
-
-// SI meters at import (AGENTS.md decision 14: convert only on import).
-double unitToMeters(const std::string& unit) {
-  if (unit == "m") {
-    return 1.0;
-  }
-  if (unit == "mm") {
-    return 0.001;
-  }
-  if (unit == "cm") {
-    return 0.01;
-  }
-  if (unit == "in") {
-    return 0.0254;
-  }
-  throw std::runtime_error("unknown mesh unit: " + unit);
-}
 
 std::string zoneNameForFace(const tinyobj::shape_t& shape,
                             const std::vector<tinyobj::material_t>& materials,
@@ -43,19 +28,6 @@ std::string zoneNameForFace(const tinyobj::shape_t& shape,
   return shape.name.empty() ? "default" : shape.name;
 }
 
-// file:///C:/... leaves a leading slash before the Windows drive; strip the
-// scheme and that slash so the result is a plain filesystem path.
-[[nodiscard]] std::filesystem::path meshUriToPath(const std::string& uri) {
-  std::string value = uri;
-  if (value.rfind("file://", 0) == 0) {
-    value = value.substr(7);
-    if (value.size() >= 3 && value[0] == '/' && value[2] == ':') {
-      value = value.substr(1);
-    }
-  }
-  return std::filesystem::path(value);
-}
-
 }  // namespace
 
 Mesh loadObj(const std::filesystem::path& path, const std::string& unit,
@@ -63,7 +35,7 @@ Mesh loadObj(const std::filesystem::path& path, const std::string& unit,
   if (!(scale > 0.0)) {
     throw std::runtime_error("mesh scale must be > 0");
   }
-  const double toMeters = unitToMeters(unit) * scale;
+  const double toMeters = detail::unitToMeters(unit) * scale;
 
   tinyobj::ObjReaderConfig config;
   config.triangulate = true;
@@ -126,53 +98,6 @@ Mesh loadObj(const std::filesystem::path& path, const std::string& unit,
   }
 
   return mesh;
-}
-
-void applyMaterialOverrides(
-    Mesh& mesh, const std::map<std::string, std::string>& overrides) {
-  for (std::string& slot : mesh.materialSlots) {
-    const auto it = overrides.find(slot);
-    if (it != overrides.end()) {
-      slot = it->second;
-    }
-  }
-}
-
-Mesh loadMeshRoom(const MeshRoom& room) {
-  Mesh mesh = loadObj(meshUriToPath(room.uri), room.unit, room.scale);
-  applyMaterialOverrides(mesh, room.materialOverrides);
-  return mesh;
-}
-
-void fillLoadedMesh(Scenario& scenario, const std::filesystem::path& baseDir) {
-  if (scenario.room.type != Room::Type::Mesh) {
-    return;
-  }
-  if (scenario.loadedMesh != nullptr) {
-    return;
-  }
-  const std::string& uri = scenario.room.mesh.uri;
-  if (uri.empty()) {
-    return;
-  }
-
-  std::filesystem::path path = meshUriToPath(uri);
-  if (path.is_relative() && !baseDir.empty()) {
-    path = baseDir / path;
-  }
-
-  try {
-    Mesh mesh = loadObj(path, scenario.room.mesh.unit, scenario.room.mesh.scale);
-    if (mesh.triangles.empty() || mesh.positions.empty()) {
-      throw std::runtime_error("mesh has no geometry");
-    }
-    applyMaterialOverrides(mesh, scenario.room.mesh.materialOverrides);
-    scenario.loadedMesh =
-        std::make_shared<const Mesh>(std::move(mesh));
-  } catch (const std::exception& error) {
-    throw std::runtime_error("failed to load mesh '" + uri + "' from '" +
-                             path.string() + "': " + error.what());
-  }
 }
 
 }  // namespace av

@@ -31,6 +31,20 @@ void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
 [[nodiscard]] Mesh loadObj(const std::filesystem::path& path,
                            const std::string& unit = "m", double scale = 1.0);
 
+// glTF/GLB import (tinygltf). Same unit/scale/material-slot semantics as
+// loadObj (material name -> mesh name -> "default"). Triangle primitives
+// only (glTF mode 4); non-triangle primitives and sparse accessors throw.
+// Node transforms are not applied — exporters must bake placement into
+// vertex positions. Throws std::runtime_error on IO/parse errors or
+// unknown unit.
+[[nodiscard]] Mesh loadGltf(const std::filesystem::path& path,
+                            const std::string& unit = "m", double scale = 1.0);
+
+// Dispatches by file extension (case-insensitive): ".obj" -> loadObj,
+// ".gltf"/".glb" -> loadGltf. Other extensions throw std::runtime_error.
+[[nodiscard]] Mesh loadMesh(const std::filesystem::path& path,
+                            const std::string& unit = "m", double scale = 1.0);
+
 // Applies scenario materialOverrides (mesh slot/zone name -> scenario
 // material id) to a loaded mesh: matching materialSlots entries are replaced
 // by the override value. Unmatched slots keep their names.
@@ -38,7 +52,8 @@ void applyMaterialOverrides(Mesh& mesh,
                             const std::map<std::string, std::string>& overrides);
 
 // MeshRoom fields already present in schemas/scenario.schema.json -> Mesh.
-// `room.uri` is a filesystem path (file:// prefix stripped). JobManager and
+// `room.uri` is a filesystem path (file:// prefix stripped); format is
+// dispatched by extension via loadMesh. JobManager and
 // engines stay IO-free; disk loading happens at the CLI/API boundary via
 // fillLoadedMesh below.
 [[nodiscard]] Mesh loadMeshRoom(const MeshRoom& room);
@@ -47,7 +62,8 @@ void applyMaterialOverrides(Mesh& mesh,
 // unless room.type == Mesh, the uri is non-empty and loadedMesh is not set
 // yet (idempotent). Relative uris resolve against `baseDir` when non-empty,
 // otherwise against the process CWD — CLI passes the scenario file's parent
-// directory, the API leaves it empty. Throws std::runtime_error when the
+// directory, the API leaves it empty. Format dispatch matches loadMesh
+// (.obj / .gltf / .glb). Throws std::runtime_error when the
 // mesh cannot be loaded or has no geometry; callers must fail the run
 // instead of letting engines see an empty shell (silent alpha=0).
 void fillLoadedMesh(Scenario& scenario,
