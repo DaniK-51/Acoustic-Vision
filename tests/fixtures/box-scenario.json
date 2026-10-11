@@ -49,7 +49,7 @@
     "durationSec": 0.5,
     "bandsHz": [125, 250, 500, 1000, 2000, 4000],
     "speedOfSound": 343.0,
-    "capturePaths": false,
+    "capturePaths": true,
     "airAbsorption": false,
     "signedIr": false,
     "fieldGrid": { "enabled": true, "nx": 16, "ny": 8, "nz": 12 },

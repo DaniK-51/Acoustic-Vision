@@ -59,11 +59,12 @@ Windows: `cmake --preset windows-msvc-x64-release` (vcpkg).
 
 ## Продуктовый цикл
 
-1. Поднять API: `build/linux-debug/apps/api/av-api --port 8787`.
+1. Поднять API **из корня репозитория**: `build/linux-debug/apps/api/av-api --port 8787`.
 2. Открыть GUI: `cd gui && npm run dev` (или `npm run build && npm start`).
-3. Загрузить demo-сценарий (кнопка **Demo** → **Load**) — появляется `sceneId`.
+3. Загрузить demo-сценарий (кнопка **Demo** → **Load**) — появляется `sceneId`. Для mesh-демо с полем и лучами — кнопка **Mesh demo (field)** (тянет `gui/public/demo/box-scenario.json`, `capturePaths: true`, fieldGrid включён). `mesh.uri` = `gui/public/demo/box.obj` и резолвится относительно CWD av-api — потому API и запускают из корня репозитория; иначе пропишите в uri абсолютный путь к `box.obj`.
 4. Перетащить источник мышью в viewport (или ввести X/Z) — позиция уезжает в backend через WS `scene.patch`.
-5. Нажать **Расчёт** — job, прогресс в статус-баре, результат в истории runs (метрики, `ir.wav`, поле по запросу engine).
+5. Нажать **Расчёт** — job, прогресс в статус-баре, результат в истории runs (метрики, `ir.wav`, поле и лучи по запросу engine).
+6. В viewport: переключатели **Field** (heat-map, дБ относительно максимума сетки) и **Rays** (полилинии лучей из `result.rays`, цвет = амплитуда, не более 64 линий).
 
 Повторять шаги 4–5 с разными алгоритмами — история runs сравнивает прогоны.
 
@@ -78,7 +79,7 @@ apps/api      # av-api REST+WS, SceneStore, RunsStore
 data/         # source_catalog.json
 schemas/      # scenario, engine-descriptor, source-catalog
 tests/        # unit + api_smoke + cli smoke + fixtures
-gui/          # placeholder (Electron later)
+gui/          # Electron + Vue + Three.js (P3, REST/WS /v1)
 ```
 
 ## Roadmap

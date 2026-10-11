@@ -120,13 +120,46 @@ function useDemo(): void {
   );
   parseError.value = '';
 }
+
+// Mesh demo fixture lives in gui/public/demo/ (copied into dist/ by Vite).
+// Relative fetch works both on the vite dev server and from the Electron
+// production file:// page (document base = dist/index.html).
+const meshDemoLoading = ref(false);
+
+async function useMeshDemo(): Promise<void> {
+  meshDemoLoading.value = true;
+  parseError.value = '';
+  try {
+    const res = await fetch('demo/box-scenario.json');
+    if (!res.ok) {
+      parseError.value = `Cannot load demo/box-scenario.json (HTTP ${res.status})`;
+      return;
+    }
+    const raw = await res.text();
+    const scenario = tryParse(raw);
+    if (!scenario) {
+      return;
+    }
+    text.value = raw;
+    emit('submit', scenario);
+  } catch (err) {
+    parseError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    meshDemoLoading.value = false;
+  }
+}
 </script>
 
 <template>
   <section class="panel">
     <header class="panel-head">
       <h2>Load scenario</h2>
-      <button class="ghost" :disabled="loading" @click="useDemo">Demo</button>
+      <span class="head-actions">
+        <button class="ghost" :disabled="loading" @click="useDemo">Demo</button>
+        <button class="ghost" :disabled="loading || meshDemoLoading" @click="useMeshDemo">
+          {{ meshDemoLoading ? 'Loading…' : 'Mesh demo (field)' }}
+        </button>
+      </span>
     </header>
 
     <textarea
@@ -150,6 +183,11 @@ function useDemo(): void {
       sceneId: {{ sceneId }} <span class="dim">(v{{ sceneVersion }})</span>
     </p>
     <p class="dim hint">POST /v1/scenarios → stored snapshot; run via Compute («Расчёт»).</p>
+    <p class="dim hint">
+      Mesh demo: mesh.uri = <code>gui/public/demo/box.obj</code> (CWD-relative) —
+      запускайте av-api из корня репозитория. Иначе пропишите в uri абсолютный
+      путь к box.obj.
+    </p>
   </section>
 </template>
 
@@ -166,6 +204,13 @@ function useDemo(): void {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+  gap: 8px;
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 h2 {

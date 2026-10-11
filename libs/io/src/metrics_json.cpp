@@ -92,6 +92,30 @@ void writeFieldJson(const std::filesystem::path& path, const Result& result) {
                 path);
 }
 
+namespace {
+
+// One polyline per captured ray path: world-space vertices plus the
+// bounce-factor amplitude and wall-hit count the engine recorded.
+nlohmann::json raysToJson(const RayPaths& rays) {
+  nlohmann::json paths = nlohmann::json::array();
+  for (const RayPolyline& path : rays.paths) {
+    nlohmann::json points = nlohmann::json::array();
+    for (const Vec3& point : path.points) {
+      points.push_back(detail::vec3ToJson(point));
+    }
+    nlohmann::json entry;
+    entry["points"] = std::move(points);
+    entry["amplitude"] = path.amplitude;
+    entry["order"] = path.order;
+    paths.push_back(std::move(entry));
+  }
+  nlohmann::json json;
+  json["paths"] = std::move(paths);
+  return json;
+}
+
+}  // namespace
+
 nlohmann::json resultToJson(const Result& result) {
   nlohmann::json json;
   json["metrics"] =
@@ -107,6 +131,9 @@ nlohmann::json resultToJson(const Result& result) {
   }
   if (result.field) {
     json["field"] = fieldToJson(*result.field);
+  }
+  if (result.rays) {
+    json["rays"] = raysToJson(*result.rays);
   }
   return json;
 }

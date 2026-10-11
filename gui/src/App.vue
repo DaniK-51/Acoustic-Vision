@@ -5,6 +5,7 @@ import type {
   EngineDescriptor,
   HealthResponse,
   JobFieldSummary,
+  JobRays,
   JobResult,
   RunDetail,
   RunSummary,
@@ -72,6 +73,9 @@ const fieldData = ref<JobFieldSummary | null>(null);
 const irWave = ref<IrWave | null>(null);
 const irWaveError = ref('');
 const irWaveLoading = ref(false);
+
+// --- GUI4: ray path polylines (from the same result JSON as metrics) ---
+const raysData = ref<JobRays | null>(null);
 
 const selectedEngine = computed<EngineDescriptor | undefined>(() =>
   engines.value.find((e) => e.id === selectedEngineId.value),
@@ -171,8 +175,9 @@ async function onScenarioSubmit(payload: Scenario | Record<string, unknown>): Pr
     sceneVersion.value = res.sceneVersion;
     scenario.value = payload as Scenario;
     selection.value = null;
-    // New scene → old heat-map no longer matches the geometry.
+    // New scene → old heat-map / rays no longer match the geometry.
     fieldData.value = null;
+    raysData.value = null;
     patchError.value = '';
     pendingOps = [];
     if (patchTimer !== null) {
@@ -204,8 +209,9 @@ async function onRun(): Promise<void> {
   flushPatch();
   submitting.value = true;
   submitError.value = '';
-  // Heat-map belongs to a finished run; drop the previous grid now.
+  // Heat-map and rays belong to a finished run; drop the previous ones now.
   fieldData.value = null;
+  raysData.value = null;
   try {
     // SimParams overlay on the stored snapshot: run keeps sceneVersion in
     // its digest while engine/methodParams come from the form.
@@ -353,8 +359,9 @@ async function openRunDetail(run: RunSummary): Promise<void> {
   runDetailError.value = '';
   runResultError.value = '';
   runResult.value = null;
-  // Field/IR follow the opened run; cleared first so a stale grid never shows.
+  // Field/IR/rays follow the opened run; cleared first so stale data never shows.
   fieldData.value = null;
+  raysData.value = null;
   irWave.value = null;
   irWaveError.value = '';
   try {
@@ -368,6 +375,7 @@ async function openRunDetail(run: RunSummary): Promise<void> {
   try {
     runResult.value = await api.jobResult(run.jobId);
     runResultError.value = '';
+    raysData.value = runResult.value?.rays ?? null;
   } catch (err) {
     runResult.value = null;
     runResultError.value = errText(err);
@@ -555,6 +563,7 @@ onBeforeUnmount(() => {
           :scenario="scenario"
           :selection="selection"
           :field="fieldData"
+          :rays="raysData"
           @select="onSelect"
           @move="onEntityMove"
         />

@@ -6,6 +6,8 @@ Electron + Vue 3 + Three.js + Vite + TypeScript. Связь с ядром **то
 
 **GUI3 (heat-map + IR):** поле `field` рисуется в viewport как point-cloud (blue→red, переключатель Field, легенда в относительных дБ — 0 = максимум сетки), график IR в RunDetail (canvas, опция dB) парсится из `ir.wav` клиентски; кнопка «Вставить источник» в каталоге добавляет источник в загруженный сценарий.
 
+**GUI4 (rays + mesh demo):** лучи `result.rays.paths` (`{points, amplitude, order}`) рисуются в viewport как LineSegments (переключатель **Rays**, цвет = амплитуда относительно сильнейшего луча, cap 64 линии). Кнопка **Mesh demo (field)** грузит `gui/public/demo/box-scenario.json` (mesh + `capturePaths: true` + fieldGrid) одним кликом. `mesh.uri` = `gui/public/demo/box.obj` (CWD-relative): **av-api нужно запускать из корня репозитория**, иначе запуск расчёта (POST `/v1/simulations`) вернёт 400 «mesh load failed» — пропишите в uri абсолютный путь к `box.obj`.
+
 ## Запуск
 
 1. Поднять API (порт по умолчанию `8787`):
@@ -59,7 +61,7 @@ CORS: av-api не отдаёт CORS-заголовков; Electron main инже
 | Status bar | `GET /v1/health` + WS `job.*` |
 | Viewport stub | three.js: grid, box (масштаб под rect-room), маркеры src/rcv, орбита |
 
-Кнопка **Demo** подставляет фикстуру в духе `tests/fixtures/demo-scenario.json`.
+Кнопка **Demo** подставляет фикстуру в духе `tests/fixtures/demo-scenario.json`. Кнопка **Mesh demo (field)** тянет `public/demo/box-scenario.json` (unit-cube mesh + ray-tracing + capturePaths + fieldGrid) и сразу POSTит его в `/v1/scenarios`.
 
 ## Структура
 
@@ -77,9 +79,9 @@ gui/
     components/        # Engine, EngineParamsForm, RunControls, RunDetail, Catalog, LoadScenario, SceneOutline, Runs, StatusBar, Viewport
 ```
 
-## Дальше (GUI3, не в slice 2)
+## Дальше (не в GUI3/GUI4)
 
-- Полный 3D-редактор (gizmos, материалы, импорт OBJ/glTF), heat-map, графики IR/RT.
+- Полный 3D-редактор (gizmos, материалы, импорт OBJ/glTF), графики RT.
 - Interactive mode: WS `scene.patch` `setPower` (move уже есть).
 
 См. `docs/idea.md` §7.

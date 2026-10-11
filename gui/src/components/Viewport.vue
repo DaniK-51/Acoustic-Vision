@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { JobFieldSummary, Scenario } from '../api/types';
+import type { JobFieldSummary, JobRays, Scenario } from '../api/types';
 
 // Interactive viewport: room box + source/receiver markers (rect rooms in
 // particular), click select, drag on the horizontal plane (X/Z, Y kept),
@@ -12,6 +12,10 @@ import type { JobFieldSummary, Scenario } from '../api/types';
 // Field heat-map: SpatialField values (linear energy, x-fastest index) drawn
 // as a Points cloud. Levels shown as relative dB — 10*log10(v/max(values)),
 // so 0 dB = grid maximum (legend states this).
+//
+// Ray paths: result.rays.paths[] polylines as one LineSegments cloud, vertex
+// color by amplitude (blue = weak → red = strong). Capped at kMaxRayPaths so
+// a large capturePathLimit cannot tank the frame rate.
 
 export interface EntityRef {
   entityType: 'source' | 'receiver';
@@ -23,6 +27,8 @@ const props = defineProps<{
   selection: EntityRef | null;
   /** Full field grid from GET /jobs/{jobId}/field (null = no heat-map). */
   field: JobFieldSummary | null;
+  /** Captured ray polylines from GET /jobs/{jobId}/result (null = no rays). */
+  rays: JobRays | null;
 }>();
 
 const emit = defineEmits<{
@@ -166,6 +172,91 @@ function toggleField(): void {
   showField.value = !showField.value;
   if (fieldPoints) {
     fieldPoints.visible = showField.value;
+  }
+}
+
+// --- ray paths ---
+// Polylines drawn as one LineSegments buffer (pair-wise segments). Vertex
+// color follows amplitude (levelColor ramp over a normalized amplitude), so
+// strong bounces read hot and weak ones recede. kMaxRayPaths matches the
+// engine-side capturePathLimit default (64) and bounds the buffer size.
+const showRays = ref(true);
+const rayLegend = ref<{ shown: number; total: number } | null>(null);
+let rayLines: THREE.LineSegments | null = null;
+
+const kMaxRayPaths = 64;
+
+function clearRays(): void {
+  if (rayLines && scene) {
+    scene.remove(rayLines);
+    rayLines.geometry.dispose();
+    (rayLines.material as THREE.Material).dispose();
+    rayLines = null;
+  }
+  rayLegend.value = null;
+}
+
+function rebuildRays(): void {
+  clearRays();
+  const rays = props.rays;
+  if (!rays || !scene) {
+    return;
+  }
+  const paths = rays.paths ?? [];
+  if (paths.length === 0) {
+    return;
+  }
+  const shownPaths = paths.slice(0, kMaxRayPaths);
+
+  // amplitude = sqrt(sourceEnergy * prod(1-alpha)) — absolute energy scale,
+  // not (0,1]; color by level relative to the strongest captured path so the
+  // ramp stays readable across engines/power settings.
+  let maxAmp = 0;
+  for (const path of shownPaths) {
+    if (Number.isFinite(path.amplitude) && path.amplitude > maxAmp) {
+      maxAmp = path.amplitude;
+    }
+  }
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  for (const path of shownPaths) {
+    const pts = path.points ?? [];
+    const t = maxAmp > 0 ? Math.min(1, Math.max(0, path.amplitude / maxAmp)) : 0;
+    const color = levelColor(t);
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      if (!a || !b || a.length < 3 || b.length < 3) {
+        continue;
+      }
+      positions.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+      colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
+    }
+  }
+  if (positions.length === 0) {
+    return;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const material = new THREE.LineBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+  });
+  rayLines = new THREE.LineSegments(geometry, material);
+  rayLines.visible = showRays.value;
+  scene.add(rayLines);
+  rayLegend.value = { shown: shownPaths.length, total: paths.length };
+}
+
+function toggleRays(): void {
+  showRays.value = !showRays.value;
+  if (rayLines) {
+    rayLines.visible = showRays.value;
   }
 }
 
@@ -420,6 +511,7 @@ onMounted(() => {
   applyRoom();
   syncMarkers();
   rebuildField();
+  rebuildRays();
 
   const canvas = renderer.domElement;
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -442,6 +534,10 @@ onMounted(() => {
     () => props.field,
     () => rebuildField(),
   );
+  watch(
+    () => props.rays,
+    () => rebuildRays(),
+  );
 
   resizeObserver = new ResizeObserver(() => onResize());
   resizeObserver.observe(el);
@@ -461,6 +557,7 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect();
   resizeObserver = null;
   clearField();
+  clearRays();
   controls?.dispose();
   controls = null;
   if (renderer) {
@@ -522,6 +619,17 @@ onBeforeUnmount(() => {
         <span class="dim">{{ legend.cells }} cells</span>
       </template>
       <span v-else-if="showField" class="dim">no cells above floor</span>
+    </div>
+    <div v-if="rayLegend" class="rays-box">
+      <label>
+        <input type="checkbox" :checked="showRays" @change="toggleRays" />
+        Rays
+      </label>
+      <template v-if="showRays">
+        <span class="mono legend-text">
+          {{ rayLegend.shown }}/{{ rayLegend.total }} paths · color = rel. amplitude
+        </span>
+      </template>
     </div>
     <div v-if="selection" class="sel-box">
       <span class="mono">{{ selection.entityType }} {{ selection.id }}</span>
@@ -594,6 +702,27 @@ onBeforeUnmount(() => {
 }
 
 .field-box label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rays-box {
+  position: absolute;
+  top: 48px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.rays-box label {
   display: flex;
   align-items: center;
   gap: 4px;

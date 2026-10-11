@@ -279,4 +279,32 @@ TEST(Io, FieldToJsonShapeAndWrite) {
 
   // No field -> no "field" key in the result JSON.
   EXPECT_FALSE(av::resultToJson(av::Result{}).contains("field"));
+
+  // Rays key shape the GUI viewport consumes (result.rays.paths[] polylines):
+  // points/amplitude/order per path, empty "paths" when capturePaths was off,
+  // key omitted entirely when the engine has no rays artifact.
+  av::RayPaths rays;
+  av::RayPolyline polyline;
+  polyline.points = {{0.0, 0.0, 0.0}, {1.0, 0.5, 0.0}, {2.0, 0.5, 1.0}};
+  polyline.amplitude = 0.75;
+  polyline.order = 2;
+  rays.paths.push_back(polyline);
+
+  av::Result withRays;
+  withRays.rays = rays;
+  const nlohmann::json withRaysJson = av::resultToJson(withRays);
+  ASSERT_TRUE(withRaysJson.contains("rays"));
+  ASSERT_EQ(withRaysJson["rays"]["paths"].size(), 1U);
+  const nlohmann::json& entry = withRaysJson["rays"]["paths"][0];
+  ASSERT_TRUE(entry["points"].is_array());
+  EXPECT_EQ(entry["points"].size(), 3U);
+  EXPECT_DOUBLE_EQ(entry["points"][0][0].get<double>(), 0.0);
+  EXPECT_DOUBLE_EQ(entry["points"][2][2].get<double>(), 1.0);
+  EXPECT_DOUBLE_EQ(entry["amplitude"].get<double>(), 0.75);
+  EXPECT_EQ(entry["order"].get<int>(), 2);
+
+  av::Result emptyRays;
+  emptyRays.rays = av::RayPaths{};
+  EXPECT_TRUE(av::resultToJson(emptyRays)["rays"]["paths"].empty());
+  EXPECT_FALSE(av::resultToJson(av::Result{}).contains("rays"));
 }

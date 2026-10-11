@@ -157,11 +157,24 @@ export interface JobFieldSummary {
   values?: number[];
 }
 
+/** One captured ray path (result.rays.paths[]): source → wall hits. */
+export interface RayPolyline {
+  points: number[][];
+  amplitude: number;
+  order: number;
+}
+
+/** resultToJson "rays" object (present only for engines with the rays artifact). */
+export interface JobRays {
+  paths: RayPolyline[];
+}
+
 /** GET /v1/jobs/{jobId}/result (resultToJson). */
 export interface JobResult {
   metrics: JobMetrics;
   ir?: JobIrSummary;
   field?: JobFieldSummary;
+  rays?: JobRays;
 }
 
 export interface JobProgress {

@@ -90,7 +90,10 @@ void writeMetricsJson(const std::filesystem::path& path, const Result& result);
 void writeFieldJson(const std::filesystem::path& path, const Result& result);
 
 // metricsToJson + IR summary (sampleRate, durationSec, channels, channelNames)
-// + full field object when present (grids are capped at kMaxFieldDim^3).
+// + full field object when present (grids are capped at kMaxFieldDim^3)
+// + "rays": {"paths": [{points, amplitude, order}]} when the engine produced
+// RayPaths (empty "paths" when capturePaths was off but the engine supports
+// rays). Key omitted entirely when Result.rays is nullopt.
 [[nodiscard]] nlohmann::json resultToJson(const Result& result);
 void writeResultJson(const std::filesystem::path& path, const Result& result);
 

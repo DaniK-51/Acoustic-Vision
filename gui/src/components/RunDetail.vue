@@ -43,6 +43,7 @@ const early = computed<EarlyReflection[]>(
 );
 const ir = computed(() => props.result?.ir ?? null);
 const field = computed(() => props.result?.field ?? null);
+const rays = computed(() => props.result?.rays ?? null);
 
 const earlyPreview = computed(() => early.value.slice(0, 8));
 
@@ -190,6 +191,15 @@ function whenText(iso: string): string {
                   </span>
                   <span class="dim">· heat-map in viewport</span>
                 </td>
+                <td v-else class="dim">absent</td>
+              </tr>
+              <tr>
+                <th>rays</th>
+                <td v-if="rays && rays.paths.length > 0">
+                  {{ rays.paths.length }} paths
+                  <span class="dim">· toggle Rays in viewport</span>
+                </td>
+                <td v-else-if="rays" class="dim">empty (capturePaths off?)</td>
                 <td v-else class="dim">absent</td>
               </tr>
             </tbody>

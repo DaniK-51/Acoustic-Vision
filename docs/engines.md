@@ -124,7 +124,7 @@ capture/grid).
 |-------|------|------------|
 | GET | `/v1/engines` | список `EngineDescriptor` |
 | POST | `/v1/simulations` | `params.engine` + `params.methodParams` |
-| GET | `/v1/simulations/{id}/paths` | polylines лучей (для 3D GUI) |
+| GET | `/v1/jobs/{id}/result` | Result JSON; полилинии лучей в `rays.paths[]` (`capturePaths=true`) |
 
 `methodParams` валидируется по `paramsSchema` конкретного engine.
 

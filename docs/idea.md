@@ -129,7 +129,7 @@ JSON-документ (`schemas/scenario.schema.json`):
   },
   "ir": { "sampleRate": 48000, "channels": ["src-1:rcv-1"], "urls": { "wav": "..." } },
   "field": { "nx": 32, "ny": 16, "nz": 24, "origin": [0, 0, 0], "cellSize": 0.19, "bandHz": 1000, "unit": "energy", "values": [] },
-  "paths": null
+  "rays": { "paths": [{ "points": [[0, 0, 0], [1, 0, 0]], "amplitude": 0.9, "order": 1 }] }
 }
 ```
 

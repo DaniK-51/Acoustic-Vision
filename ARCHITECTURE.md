@@ -264,7 +264,7 @@ Server events (JSON):
 
 REST polling (`GET /jobs/{id}`) is the fallback; WS is progressive enhancement.
 
-**Extensibility for 3D GUI**: every result includes `paths` hook (`/simulations/{id}/paths?maxReflections=K` → list of polylines world-space). Empty in IMS v1 unless early-reflection enumeration is on (`simParams.capturePaths=true`).
+**Extensibility for 3D GUI**: every result includes the ray-path hook — `resultToJson` embeds `"rays": {"paths": [{points: Vec3[], amplitude, order}]}` (world-space polylines) in `GET /v1/jobs/{id}/result`. Empty `paths` unless `simParams.capturePaths=true`; key omitted for engines without the `rays` artifact.
 
 ---
 
