@@ -36,7 +36,7 @@ class HybridEngine : public IEngine {
   [[nodiscard]] EngineDescriptor descriptor() const override {
     EngineDescriptor desc;
     desc.id = "hybrid";
-    desc.name = "Hybrid Early + RT Late";
+    desc.name = "Hybrid (early/late RT)";
     desc.version = "0.1.0";
     desc.caps.supportsRect = false;
     desc.caps.supportsMesh = true;

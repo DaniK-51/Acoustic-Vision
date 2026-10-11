@@ -41,8 +41,9 @@ CORS: av-api не отдаёт CORS-заголовков; Electron main инже
 | Compute («Расчёт» / «Отмена») | `POST /v1/simulations`, `POST /v1/jobs/{id}/cancel` |
 | Run detail (модалка) | `GET /v1/runs/{id}` + `GET /v1/jobs/{jobId}/result`, `ir.wav` download |
 | Status bar | job id из ответа submit + WS `job.*` (прогресс, terminal → refresh runs) |
+| Interactive move | viewport: select + drag (X/Z) / числовые X/Z → WS `scene.patch` `move`; `scene.patched` / `scene.error` |
 
-Тело submit: `{sceneId}` когда engine/methodParams не расходятся со snapshot (так run digest сохраняет `sceneVersion`); иначе — полный scenario c `params.engine` / `params.methodParams` (API при `sceneId` заменяет body snapshot'ом, поэтому overrides едут только в полном scenario).
+Тело submit: `{"sceneId", engine?, methodParams?, params?}` — сервер накладывает overlay на snapshot сцены (run digest сохраняет `sceneVersion`). Полный scenario без `sceneId` — как раньше.
 
 ## Что есть в slice 1
 
@@ -77,6 +78,6 @@ gui/
 ## Дальше (GUI3, не в slice 2)
 
 - Полный 3D-редактор (gizmos, материалы, импорт OBJ/glTF), heat-map, графики IR/RT.
-- Interactive mode: WS `scene.patch` (move / setPower).
+- Interactive mode: WS `scene.patch` `setPower` (move уже есть).
 
 См. `docs/idea.md` §7.

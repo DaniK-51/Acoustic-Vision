@@ -94,6 +94,17 @@ export class EventsSocket {
     this.sendRaw({ op: 'subscribeScene', sceneId });
   }
 
+  /** Interactive move/power patch; ack is scene.patched / scene.error. */
+  scenePatch(
+    sceneId: string,
+    ops: Array<Record<string, unknown>>,
+  ): void {
+    if (!sceneId || ops.length === 0) {
+      return;
+    }
+    this.sendRaw({ op: 'scene.patch', sceneId, ops });
+  }
+
   close(): void {
     this.closedByUser = true;
     if (this.reconnectTimer !== null) {

@@ -435,6 +435,48 @@ def main():
                f"paramsDigest sceneVersion: {run}")
         print("ok: scene-based simulation + run sceneVersion")
 
+        # Scene submit + SimParams overlay: engine/methodParams ride on the
+        # snapshot body and still record sceneVersion in the run.
+        status, accepted = http("POST", f"{base}/v1/simulations", {
+            "sceneId": scene_id,
+            "engine": "sabine-eyring",
+            "methodParams": {"probe": 7},
+            "params": {"maxReflectionOrder": 3},
+        })
+        expect(status == 202 and accepted.get("jobId"),
+               f"overlay submit: {status} {accepted}")
+        overlay_job = accepted["jobId"]
+        for _ in range(80):
+            status, st = http("GET", f"{base}/v1/jobs/{overlay_job}")
+            expect(status == 200, f"overlay job status: {status} {st}")
+            if st.get("state") in ("succeeded", "failed", "cancelled"):
+                break
+            time.sleep(0.1)
+        expect(st.get("state") == "succeeded", f"overlay job state: {st}")
+        status, run = http("GET", f"{base}/v1/runs/{overlay_job}")
+        expect(status == 200, f"overlay run: {status} {run}")
+        digest = run.get("paramsDigest", {})
+        expect(run.get("engine") == "sabine-eyring", f"overlay engine: {run}")
+        expect(digest.get("engine") == "sabine-eyring", f"overlay digest engine: {run}")
+        expect(digest.get("methodParams") == {"probe": 7},
+               f"overlay digest methodParams: {run}")
+        expect(digest.get("maxReflectionOrder") == 3,
+               f"overlay digest maxReflectionOrder: {run}")
+        expect(digest.get("sceneVersion") == 2, f"overlay digest sceneVersion: {run}")
+        print("ok: scene submit with engine/methodParams/params overlay")
+
+        status, body = http("POST", f"{base}/v1/simulations",
+                            {"sceneId": scene_id, "engine": "no-such-engine"})
+        expect(status == 400 and "engine" in (body.get("title", "") + body.get("detail", "")).lower(),
+               f"overlay unknown engine 400: {status} {body}")
+        status, body = http("POST", f"{base}/v1/simulations",
+                            {"sceneId": scene_id, "params": {"nope": 1}})
+        expect(status == 400, f"overlay unknown params key 400: {status} {body}")
+        status, body = http("POST", f"{base}/v1/simulations",
+                            {"sceneId": scene_id, "room": {"type": "rect"}})
+        expect(status == 400, f"overlay rejects non-overlay keys: {status} {body}")
+        print("ok: scene overlay error paths")
+
         status, body = http("POST", f"{base}/v1/simulations", {"sceneId": "nope"})
         expect(status == 404 and body.get("status") == 404, f"scene submit 404: {status} {body}")
         status, body = http("POST", f"{base}/v1/scenarios", {"schemaVersion": 1})

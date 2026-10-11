@@ -9,11 +9,26 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace av::api {
+namespace {
+
+// SimParams fields a {"sceneId"} submit may override without sending the
+// whole scenario. Top-level "engine"/"methodParams" are shorthands for the
+// same keys inside "params".
+bool isParamsOverlayKey(const std::string& key) {
+  static const std::set<std::string> kKeys = {
+      "engine",        "methodParams", "maxReflectionOrder", "sampleRate",
+      "durationSec",   "bandsHz",      "speedOfSound",       "capturePaths",
+      "airAbsorption", "signedIr",     "fieldGrid"};
+  return kKeys.count(key) != 0;
+}
+
+}  // namespace
 
 void registerSimulationRoutes(crow::SimpleApp& app, JobManager& jobs,
                               RunsStore& runs, SceneStore& scenes) {
@@ -26,10 +41,28 @@ void registerSimulationRoutes(crow::SimpleApp& app, JobManager& jobs,
           return problemRes(400, "invalid JSON body", error.what());
         }
 
-        // Scene-based submit: {"sceneId"} replaces an inline scenario; the
-        // stored snapshot (with its sceneVersion) is the run's scenario.
+        // Scene-based submit: the stored snapshot (with its sceneVersion) is
+        // the run's scenario; {"sceneId", engine?, methodParams?, params?}
+        // overlays SimParams onto that snapshot before validate/submit. A
+        // full inline scenario (no sceneId) is unchanged.
         std::optional<std::uint64_t> sceneVersion;
         if (body.contains("sceneId")) {
+          if (!body.at("sceneId").is_string()) {
+            return problemRes(400, "invalid submit body",
+                              "sceneId must be a string");
+          }
+          for (auto it = body.begin(); it != body.end(); ++it) {
+            const std::string& key = it.key();
+            if (key == "sceneId" || key == "engine" || key == "methodParams" ||
+                key == "params") {
+              continue;
+            }
+            return problemRes(
+                400, "invalid submit body",
+                "key '" + key +
+                    "' is not accepted with sceneId; use the params overlay "
+                    "or submit a full scenario without sceneId");
+          }
           const std::string sceneId = body.at("sceneId").get<std::string>();
           const std::optional<SceneSnapshot> snapshot =
               scenes.get(sceneId);
@@ -37,7 +70,40 @@ void registerSimulationRoutes(crow::SimpleApp& app, JobManager& jobs,
             return problemRes(404, "scene not found", sceneId);
           }
           sceneVersion = snapshot->sceneVersion;
+
+          nlohmann::json overlay = nlohmann::json::object();
+          if (body.contains("engine")) {
+            overlay["engine"] = body.at("engine");
+          }
+          if (body.contains("methodParams")) {
+            overlay["methodParams"] = body.at("methodParams");
+          }
+          if (body.contains("params")) {
+            if (!body.at("params").is_object()) {
+              return problemRes(400, "invalid submit body",
+                                "params must be an object");
+            }
+            for (auto it = body.at("params").begin();
+                 it != body.at("params").end(); ++it) {
+              overlay[it.key()] = it.value();
+            }
+          }
+          for (auto it = overlay.begin(); it != overlay.end(); ++it) {
+            const std::string& key = it.key();
+            if (!isParamsOverlayKey(key)) {
+              return problemRes(400, "invalid submit body",
+                                "unknown params override '" + key + "'");
+            }
+            if ((key == "methodParams" || key == "fieldGrid") &&
+                !it.value().is_object()) {
+              return problemRes(400, "invalid submit body",
+                                key + " must be an object");
+            }
+          }
           body = scenarioToJson(snapshot->scenario);
+          for (auto it = overlay.begin(); it != overlay.end(); ++it) {
+            body.at("params")[it.key()] = it.value();
+          }
         }
 
         Scenario scenario;

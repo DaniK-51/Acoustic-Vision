@@ -27,7 +27,7 @@ const emit = defineEmits<{ run: []; cancel: [] }>();
     <p v-if="error" class="error-text">{{ error }}</p>
     <p v-else-if="!hasScene" class="dim hint">Load a scenario first (sceneId).</p>
     <p class="dim hint">
-      POST /v1/simulations — {sceneId} or full scenario with params override.
+      POST /v1/simulations — {sceneId} + engine/methodParams overlay.
     </p>
   </section>
 </template>

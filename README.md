@@ -57,6 +57,16 @@ build/linux-debug/apps/api/av-api --port 8787
 
 Windows: `cmake --preset windows-msvc-x64-release` (vcpkg).
 
+## Продуктовый цикл
+
+1. Поднять API: `build/linux-debug/apps/api/av-api --port 8787`.
+2. Открыть GUI: `cd gui && npm run dev` (или `npm run build && npm start`).
+3. Загрузить demo-сценарий (кнопка **Demo** → **Load**) — появляется `sceneId`.
+4. Перетащить источник мышью в viewport (или ввести X/Z) — позиция уезжает в backend через WS `scene.patch`.
+5. Нажать **Расчёт** — job, прогресс в статус-баре, результат в истории runs (метрики, `ir.wav`, поле по запросу engine).
+
+Повторять шаги 4–5 с разными алгоритмами — история runs сравнивает прогоны.
+
 ## Структура репозитория
 
 ```

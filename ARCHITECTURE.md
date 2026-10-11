@@ -171,7 +171,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 
 ### scene store + interactive patches
 - Backend owns the **Scene Store** (full scenario state, `sceneVersion`, uint64 from 1). In-memory (`SceneStore`, thread-safe); `sceneId` is uuid-lite.
-- REST: `POST /v1/scenarios` (scenario JSON → `{sceneId, sceneVersion}`), `GET /v1/scenarios/{sceneId}` (→ `{sceneId, sceneVersion, scenario}`). `POST /v1/simulations` accepts `{"sceneId"}` instead of an inline scenario; the stored snapshot runs and its `sceneVersion` lands in the run record / `paramsDigest`.
+- REST: `POST /v1/scenarios` (scenario JSON → `{sceneId, sceneVersion}`), `GET /v1/scenarios/{sceneId}` (→ `{sceneId, sceneVersion, scenario}`). `POST /v1/simulations` accepts `{"sceneId"}` instead of an inline scenario; the stored snapshot runs and its `sceneVersion` lands in the run record / `paramsDigest`. With `sceneId` the body may also carry a SimParams overlay — top-level `engine` / `methodParams` plus `params` with any of `engine`, `methodParams`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid` — merged onto the snapshot before validate/submit (unknown keys → 400).
 - Interactive edits use WS deltas on `/v1/events`, not full recompute:
   - client → `scene.patch` `{ "op": "scene.patch", sceneId, ops: [...] }`
   - server → `scene.patched` `{ sceneId, sceneVersion, applied }` or `scene.error` `{ detail }` (ack on the requester's connection) **and** the same outcome fanned out to connections that sent `{ "op": "subscribeScene", sceneId }` (requester excluded — no double delivery). `sceneVersion` is uint64 everywhere (run record, `paramsDigest`, wire).

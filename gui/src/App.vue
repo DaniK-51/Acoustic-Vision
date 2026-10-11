@@ -23,7 +23,7 @@ import RunDetailPanel from './components/RunDetail.vue';
 import RunsPanel from './components/RunsPanel.vue';
 import SceneOutlinePanel from './components/SceneOutlinePanel.vue';
 import StatusBar from './components/StatusBar.vue';
-import Viewport from './components/Viewport.vue';
+import Viewport, { type EntityRef } from './components/Viewport.vue';
 
 // --- shared state (GUI1 slice: read-only views + scenario load) ---
 const engines = ref<EngineDescriptor[]>([]);
@@ -161,6 +161,14 @@ async function onScenarioSubmit(payload: Scenario | Record<string, unknown>): Pr
     sceneId.value = res.sceneId;
     sceneVersion.value = res.sceneVersion;
     scenario.value = payload as Scenario;
+    selection.value = null;
+    patchError.value = '';
+    pendingOps = [];
+    if (patchTimer !== null) {
+      clearTimeout(patchTimer);
+      patchTimer = null;
+    }
+    socket?.subscribeScene(res.sceneId);
     resetMethodParams();
   } catch (err) {
     sceneId.value = '';
@@ -181,19 +189,16 @@ async function onRun(): Promise<void> {
   if (!sceneId.value || !scenario.value || submitting.value) {
     return;
   }
+  // Land any debounced moves first — the run reads the server snapshot.
+  flushPatch();
   submitting.value = true;
   submitError.value = '';
   try {
-    // Baseline = what a bare {sceneId} submit would run: schema defaults
-    // overlaid with the snapshot's methodParams (engines default the rest).
-    const baseline = formValuesFrom(
-      selectedEngine.value?.paramsSchema,
-      storedMethodParams(),
-    );
-    const res = await api.submitSimulationForScene(sceneId.value, scenario.value, {
+    // SimParams overlay on the stored snapshot: run keeps sceneVersion in
+    // its digest while engine/methodParams come from the form.
+    const res = await api.submitSimulationForScene(sceneId.value, {
       engine: selectedEngineId.value || undefined,
       methodParams: methodParams.value,
-      baselineMethodParams: baseline,
     });
     currentJobId.value = res.jobId;
     activeJob.value = {
@@ -207,6 +212,82 @@ async function onRun(): Promise<void> {
   } finally {
     submitting.value = false;
   }
+}
+
+// --- interactive move (scene.patch) ---
+const selection = ref<EntityRef | null>(null);
+const patchError = ref('');
+let patchTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingOps: Array<Record<string, unknown>> = [];
+
+function applyMove(ref: EntityRef, position: [number, number, number]): void {
+  const sc = scenario.value;
+  if (!sc) {
+    return;
+  }
+  const list = ref.entityType === 'source' ? sc.sources : sc.receivers;
+  const entity = (list ?? []).find((e) => e.id === ref.id);
+  if (entity) {
+    entity.position = position;
+  }
+}
+
+/** Drop optimistic state and take the server snapshot again (scene.error). */
+async function resyncScenario(): Promise<void> {
+  if (!sceneId.value) {
+    return;
+  }
+  try {
+    const loaded = await api.getScenario(sceneId.value);
+    scenario.value = loaded.scenario;
+    sceneVersion.value = loaded.sceneVersion;
+  } catch {
+    // Keep the optimistic state; the error text already tells the user.
+  }
+}
+
+function flushPatch(): void {
+  patchTimer = null;
+  if (pendingOps.length === 0) {
+    return;
+  }
+  const ops = pendingOps;
+  pendingOps = [];
+  if (sceneId.value && socket) {
+    socket.scenePatch(sceneId.value, ops);
+  }
+}
+
+function onEntityMove(ref: EntityRef, position: [number, number, number]): void {
+  if (!sceneId.value) {
+    return;
+  }
+  applyMove(ref, position);
+  // Coalesce: only the latest position per entity rides in the next patch.
+  const key = `${ref.entityType}:${ref.id}`;
+  const op = {
+    op: 'move',
+    entityType: ref.entityType,
+    id: ref.id,
+    position: [position[0], position[1], position[2]],
+  };
+  const existing = pendingOps.findIndex(
+    (o) => `${o.entityType}:${o.id}` === key,
+  );
+  if (existing >= 0) {
+    pendingOps[existing] = op;
+  } else {
+    pendingOps.push(op);
+  }
+  // Trailing debounce: one scene.patch per pause in the drag, not per pixel.
+  if (patchTimer !== null) {
+    clearTimeout(patchTimer);
+  }
+  patchTimer = setTimeout(flushPatch, 150);
+}
+
+function onSelect(ref: EntityRef | null): void {
+  selection.value = ref;
 }
 
 async function onCancel(): Promise<void> {
@@ -309,6 +390,20 @@ function onWsEvent(event: Record<string, unknown>): void {
   } else if (kind === 'job.cancelled') {
     activeJob.value = { jobId, state: 'cancelled', fraction: 0, stage: 'cancelled' };
     void onJobTerminal(jobId, 'cancelled');
+  } else if (kind === 'scene.patched') {
+    if (String(event.sceneId ?? '') === sceneId.value) {
+      const version = Number(event.sceneVersion ?? 0);
+      if (Number.isFinite(version) && version > 0) {
+        sceneVersion.value = version;
+      }
+      patchError.value = '';
+    }
+  } else if (kind === 'scene.error') {
+    if (!event.sceneId || String(event.sceneId) === sceneId.value) {
+      patchError.value = String(event.detail ?? 'scene.patch failed');
+      // Drop optimistic positions the server rejected.
+      void resyncScenario();
+    }
   }
 }
 
@@ -363,7 +458,13 @@ onBeforeUnmount(() => {
       </aside>
 
       <main class="col center">
-        <Viewport :scenario="scenario" />
+        <Viewport
+          :scenario="scenario"
+          :selection="selection"
+          @select="onSelect"
+          @move="onEntityMove"
+        />
+        <p v-if="patchError" class="error-text patch-error">{{ patchError }}</p>
       </main>
 
       <aside class="col right">

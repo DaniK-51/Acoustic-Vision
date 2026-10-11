@@ -1,5 +1,4 @@
 import { apiBaseUrl } from '../config';
-import { jsonEqual } from '../params-schema';
 import type {
   CreateSceneResponse,
   EngineDescriptor,
@@ -98,49 +97,30 @@ export const api = {
     request<SubmitSimulationResponse>('POST', '/simulations', body),
 
   /**
-   * Submit a run for a stored scene.
-   *
-   * POST /v1/simulations treats `{"sceneId"}` and a full scenario as mutually
-   * exclusive: a body with sceneId is replaced by the stored snapshot, so any
-   * extra keys (engine/methodParams overrides) would be dropped. When the
-   * request diverges from the snapshot we therefore send a full scenario;
-   * otherwise we send `{sceneId}` so the run keeps sceneVersion in its digest.
+   * Submit a run for a stored scene via the SimParams overlay:
+   * `{"sceneId", engine?, methodParams?, params?}` — the server merges the
+   * overlay onto the stored snapshot, so the run keeps sceneVersion in its
+   * digest. Full-scenario submit stays available via submitSimulation().
    */
   submitSimulationForScene: (
     sceneId: string,
-    scenario: Scenario | Record<string, unknown>,
     overrides: {
       engine?: string;
       methodParams?: Record<string, unknown>;
-      /** methodParams a bare {sceneId} submit would effectively run with. */
-      baselineMethodParams?: Record<string, unknown>;
+      params?: Record<string, unknown>;
     } = {},
   ) => {
-    const params = (scenario as Scenario).params ?? {};
-    const engineChanged =
-      overrides.engine !== undefined && overrides.engine !== params.engine;
-    const methodChanged =
-      overrides.methodParams !== undefined &&
-      !jsonEqual(
-        overrides.methodParams,
-        overrides.baselineMethodParams ?? params.methodParams ?? {},
-      );
-    if (!engineChanged && !methodChanged) {
-      return request<SubmitSimulationResponse>('POST', '/simulations', {
-        sceneId,
-      });
+    const body: Record<string, unknown> = { sceneId };
+    if (overrides.engine !== undefined) {
+      body.engine = overrides.engine;
     }
-    const merged = {
-      ...scenario,
-      params: {
-        ...params,
-        ...(overrides.engine !== undefined ? { engine: overrides.engine } : {}),
-        ...(overrides.methodParams !== undefined
-          ? { methodParams: overrides.methodParams }
-          : {}),
-      },
-    };
-    return request<SubmitSimulationResponse>('POST', '/simulations', merged);
+    if (overrides.methodParams !== undefined) {
+      body.methodParams = overrides.methodParams;
+    }
+    if (overrides.params !== undefined) {
+      body.params = overrides.params;
+    }
+    return request<SubmitSimulationResponse>('POST', '/simulations', body);
   },
 
   jobStatus: (jobId: string) =>
