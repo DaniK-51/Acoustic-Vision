@@ -2,11 +2,14 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <string>
 #include <vector>
 
 #include <nlohmann/json.hpp>
 
 #include <av/acoustics/engine.hpp>
+#include <av/geometry/mesh.hpp>
 #include <av/metrics/metrics.hpp>
 #include <av/scenario/scenario.hpp>
 
@@ -20,6 +23,25 @@ namespace av {
 // File helpers; throw std::runtime_error on IO or parse failure.
 [[nodiscard]] Scenario loadScenario(const std::filesystem::path& path);
 void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
+
+// Wavefront OBJ import. `unit` is "m"|"mm"|"cm"|"in"; vertex positions are
+// converted to meters at import (SI convention, AGENTS.md decision 14) and
+// multiplied by `scale`. Polygons are triangulated. Throws
+// std::runtime_error on IO/parse errors or unknown unit.
+[[nodiscard]] Mesh loadObj(const std::filesystem::path& path,
+                           const std::string& unit = "m", double scale = 1.0);
+
+// Applies scenario materialOverrides (mesh slot/zone name -> scenario
+// material id) to a loaded mesh: matching materialSlots entries are replaced
+// by the override value. Unmatched slots keep their names.
+void applyMaterialOverrides(Mesh& mesh,
+                            const std::map<std::string, std::string>& overrides);
+
+// MeshRoom fields already present in schemas/scenario.schema.json -> Mesh.
+// `room.uri` is a filesystem path (file:// prefix stripped). The JobManager
+// does NOT auto-load mesh files; engines or the API layer call this at run
+// time when a mesh room is actually consumed.
+[[nodiscard]] Mesh loadMeshRoom(const MeshRoom& room);
 
 // IEEE float32 PCM WAV (format tag 3). IrBuffer is planar [channel][sample];
 // samples are interleaved on write. Channel count and sample rate must be

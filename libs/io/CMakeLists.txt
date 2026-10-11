@@ -1,7 +1,20 @@
+include(FetchContent)
+
+# tinyobjloader is header-only for our purposes; SOURCE_SUBDIR points at a
+# path without CMakeLists.txt so MakeAvailable populates sources but does not
+# add_subdirectory (and does not build their tester tools).
+FetchContent_Declare(tinyobjloader
+  GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
+  GIT_TAG v2.0.0rc13
+  SOURCE_SUBDIR unused-no-cmake-here
+)
+FetchContent_MakeAvailable(tinyobjloader)
+
 add_library(av_io
   src/scenario_json.cpp
   src/wav.cpp
   src/metrics_json.cpp
+  src/obj_import.cpp
 )
 
 add_library(av::io ALIAS av_io)
@@ -19,5 +32,7 @@ target_link_libraries(av_io
     av::core
     nlohmann_json::nlohmann_json
 )
+
+target_include_directories(av_io PRIVATE "${tinyobjloader_SOURCE_DIR}")
 
 av_set_warnings(av_io)

@@ -18,7 +18,13 @@ add_executable(av_unit_tests
   unit/test_metrics.cpp
   unit/test_engines.cpp
   unit/test_io.cpp
+  unit/test_mesh.cpp
+  unit/test_obj_import.cpp
   unit/test_sim.cpp
+)
+
+target_compile_definitions(av_unit_tests
+  PRIVATE AV_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
 
 target_link_libraries(av_unit_tests
