@@ -56,3 +56,20 @@ if(AV_BUILD_API AND TARGET av-api)
     message(STATUS "Python3 not found; api_smoke integration test skipped")
   endif()
 endif()
+
+# CLI field smoke: av-cli run writes field.json when params.fieldGrid is set.
+if(TARGET av-cli)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME cli_field_smoke
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/integration/cli_field_smoke.py"
+              "$<TARGET_FILE:av-cli>"
+              "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/box-scenario.json"
+    )
+    set_tests_properties(cli_field_smoke PROPERTIES TIMEOUT 60)
+  else()
+    message(STATUS "Python3 not found; cli_field_smoke integration test skipped")
+  endif()
+endif()

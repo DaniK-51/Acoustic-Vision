@@ -277,6 +277,39 @@ def main():
             expect(status == 400 and "mesh" in body.get("title", "").lower(),
                    f"broken mesh uri: {status} {body}")
             print("ok: broken mesh uri rejected")
+
+            # P2d: spatial field artifact + GET /v1/jobs/{id}/field.
+            field_scenario = json.loads(json.dumps(mesh_scenario))
+            field_scenario["params"]["fieldGrid"] = {
+                "enabled": True, "nx": 6, "ny": 4, "nz": 5,
+            }
+            field_scenario["params"]["methodParams"]["rayCount"] = 400
+            field_scenario["params"]["methodParams"]["maxBounces"] = 16
+            status, accepted = http("POST", f"{base}/v1/simulations?sync=1", field_scenario)
+            expect(status == 200, f"field sync simulation: {status} {accepted}")
+            field_id = accepted.get("jobId")
+            expect(isinstance(field_id, str) and field_id, "field jobId")
+            expect("field" in accepted, f"sync result includes field: {accepted.keys()}")
+            expect(accepted["field"].get("nx") == 6, f"sync field dims: {accepted['field']}")
+
+            status, field = http("GET", f"{base}/v1/jobs/{field_id}/field")
+            expect(status == 200, f"field endpoint: {status} {field}")
+            for key in ("nx", "ny", "nz", "origin", "cellSize", "bandHz", "unit", "values"):
+                expect(key in field, f"field key {key}")
+            expect(field["nx"] == 6 and field["ny"] == 4 and field["nz"] == 5,
+                   f"field dims: {field['nx'], field['ny'], field['nz']}")
+            expect(len(field["values"]) == 6 * 4 * 5, f"field values: {len(field['values'])}")
+            expect(field["unit"] == "energy", f"field unit: {field['unit']}")
+            expect(any(v > 0 for v in field["values"]), "field has nonzero values")
+            expect(all(v == v and abs(v) != float("inf") for v in field["values"]),
+                   "field values finite")
+            print("ok: field artifact + endpoint")
+
+            # Jobs without a fieldGrid request expose no field artifact.
+            status, body = http("GET", f"{base}/v1/jobs/{mesh_id}/field")
+            expect(status == 404 and body.get("status") == 404,
+                   f"field 404 when absent: {status} {body}")
+            print("ok: field 404 when absent")
         else:
             print("note: box-scenario.json/box.obj fixtures missing; mesh smoke skipped")
 

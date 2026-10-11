@@ -128,7 +128,7 @@ JSON-документ (`schemas/scenario.schema.json`):
     "earlyReflections": [{ "t": 0.012, "amp": 0.4, "order": 1 }]
   },
   "ir": { "sampleRate": 48000, "channels": ["src-1:rcv-1"], "urls": { "wav": "..." } },
-  "field": { "grid": {"nx": 32, "ny": 16, "nz": 24}, "bandHz": 1000, "unit": "dB" },
+  "field": { "nx": 32, "ny": 16, "nz": 24, "origin": [0, 0, 0], "cellSize": 0.19, "bandHz": 1000, "unit": "energy", "values": [] },
   "paths": null
 }
 ```

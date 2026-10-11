@@ -159,6 +159,15 @@ nlohmann::json paramsToJson(const SimParams& params) {
   json["airAbsorption"] = params.airAbsorption;
   json["signedIr"] = params.signedIr;
   json["methodParams"] = params.methodParams;
+  if (params.fieldGrid.enabled || params.fieldGrid.nx != 0 ||
+      params.fieldGrid.ny != 0 || params.fieldGrid.nz != 0) {
+    nlohmann::json grid;
+    grid["enabled"] = params.fieldGrid.enabled;
+    grid["nx"] = params.fieldGrid.nx;
+    grid["ny"] = params.fieldGrid.ny;
+    grid["nz"] = params.fieldGrid.nz;
+    json["fieldGrid"] = std::move(grid);
+  }
   return json;
 }
 
@@ -178,6 +187,13 @@ SimParams paramsFromJson(const nlohmann::json& json) {
   params.signedIr = json.value("signedIr", false);
   params.methodParams =
       json.value("methodParams", nlohmann::json::object());
+  if (json.contains("fieldGrid")) {
+    const nlohmann::json& grid = json.at("fieldGrid");
+    params.fieldGrid.enabled = grid.value("enabled", false);
+    params.fieldGrid.nx = grid.value("nx", 0);
+    params.fieldGrid.ny = grid.value("ny", 0);
+    params.fieldGrid.nz = grid.value("nz", 0);
+  }
   return params;
 }
 

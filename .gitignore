@@ -12,6 +12,7 @@ cmake-build-*/
 .vscode/
 .idea/
 compile_commands.json
+Testing/
 
 # Deps / packages
 vcpkg_installed/

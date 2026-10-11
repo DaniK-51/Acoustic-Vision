@@ -49,6 +49,16 @@ struct Receiver {
   Vec3 position;
 };
 
+// Optional spatial-field grid request (scenario.params.fieldGrid). Engines
+// that produce Result.field honour it; others leave the artifact empty. The
+// grid covers the room bounds (see makeFieldGrid). Disabled by default.
+struct FieldGridParams {
+  bool enabled = false;
+  int nx = 0;
+  int ny = 0;
+  int nz = 0;
+};
+
 struct SimParams {
   std::string engine;
   int maxReflectionOrder = 0;
@@ -60,6 +70,7 @@ struct SimParams {
   bool airAbsorption = false;
   bool signedIr = false;
   nlohmann::json methodParams = nlohmann::json::object();
+  FieldGridParams fieldGrid;
 };
 
 struct Scenario {

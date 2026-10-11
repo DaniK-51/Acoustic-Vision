@@ -44,8 +44,54 @@ struct IrBuffer {
   std::vector<std::string> channelNames;
 };
 
-// Artifact placeholders; shapes land with the producing engines (P0-P2).
-struct SpatialField {};
+// --- Spatial field (heat-map artifact) ---
+
+// Regular cubic-cell grid of energy density over the room volume.
+// values stores *linear* energy density, not dB (unit is always "energy" in
+// v1): convert to level at the API/UI edge. Index order is x-fastest,
+// i = x + nx*(y + ny*z) (documented order shared with GUI/JSON).
+struct SpatialField {
+  int nx = 0;
+  int ny = 0;
+  int nz = 0;
+  // World-space min corner of cell (0,0,0).
+  Vec3 origin{};
+  // Cubic cell edge length, m (v1: one size for all axes).
+  double cellSize = 0.0;
+  // 0 = broadband (the only mode engines produce in v1).
+  double bandHz = 0.0;
+  // "energy" | "dB"; v1 stores linear energy, so always "energy".
+  std::string unit = "energy";
+  // size nx*ny*nz.
+  std::vector<float> values;
+
+  [[nodiscard]] std::size_t cellCount() const {
+    return static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny) *
+           static_cast<std::size_t>(nz);
+  }
+
+  // Index of cell (x,y,z), x fastest.
+  [[nodiscard]] std::size_t index(int x, int y, int z) const {
+    return static_cast<std::size_t>(x) +
+           static_cast<std::size_t>(nx) *
+               (static_cast<std::size_t>(y) +
+                static_cast<std::size_t>(ny) * static_cast<std::size_t>(z));
+  }
+};
+
+// Per-axis cell-count cap: keeps grids drawable by the GUI and result JSON
+// payloads small (max 64^3 cells). Larger requests are clamped with a
+// validate() warning.
+inline constexpr int kMaxFieldDim = 64;
+
+// Zero-filled grid covering `bounds`: origin = bounds.min, cubic cellSize =
+// max(extent/n) over the axes so the grid spans the whole box (cells may
+// overshoot on smaller axes). Dims are clamped to [1, kMaxFieldDim].
+[[nodiscard]] SpatialField makeFieldGrid(const Aabb& bounds, int nx, int ny,
+                                         int nz);
+
+// Accumulates `energy` into the cell containing `p`; no-op outside the grid.
+void depositEnergy(SpatialField& field, const Vec3& p, double energy);
 
 // One traced ray path in world space: source position then successive wall
 // hits. amplitude is the bounce-factor amplitude (prod sqrt(1-alpha), without

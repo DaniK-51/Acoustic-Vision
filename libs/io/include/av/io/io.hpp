@@ -66,7 +66,15 @@ void writeWav(const std::filesystem::path& path, const IrBuffer& ir);
 [[nodiscard]] nlohmann::json metricsToJson(const Metrics& metrics);
 void writeMetricsJson(const std::filesystem::path& path, const Result& result);
 
-// metricsToJson + IR summary (sampleRate, durationSec, channels, channelNames).
+// Spatial field JSON: {nx, ny, nz, origin, cellSize, bandHz, unit, values}.
+// values are linear energy density (unit == "energy"); the dB conversion
+// happens at the API/UI edge. Field artifact JSON (CLI field.json,
+// GET /v1/jobs/{id}/field) uses this exact shape.
+[[nodiscard]] nlohmann::json fieldToJson(const SpatialField& field);
+void writeFieldJson(const std::filesystem::path& path, const Result& result);
+
+// metricsToJson + IR summary (sampleRate, durationSec, channels, channelNames)
+// + full field object when present (grids are capped at kMaxFieldDim^3).
 [[nodiscard]] nlohmann::json resultToJson(const Result& result);
 void writeResultJson(const std::filesystem::path& path, const Result& result);
 

@@ -74,3 +74,64 @@ TEST(Metrics, EarlyReflectionsMaxPeaksKeepsLoudest) {
   ASSERT_EQ(refs.size(), 1U);
   EXPECT_NEAR(refs[0].t, 0.010, 1e-9);
 }
+
+TEST(SpatialField, IndexMathIsXFastest) {
+  av::SpatialField field;
+  field.nx = 4;
+  field.ny = 3;
+  field.nz = 2;
+  EXPECT_EQ(field.cellCount(), 24U);
+  EXPECT_EQ(field.index(0, 0, 0), 0U);
+  EXPECT_EQ(field.index(1, 0, 0), 1U);
+  EXPECT_EQ(field.index(0, 1, 0), 4U);
+  EXPECT_EQ(field.index(0, 0, 1), 12U);
+  EXPECT_EQ(field.index(3, 2, 1), 3U + 4U * (2U + 3U * 1U));
+  EXPECT_EQ(field.index(3, 2, 1), 23U);
+}
+
+TEST(SpatialField, MakeFieldGridCoversBounds) {
+  const av::Aabb bounds{{0.0, 0.0, 0.0}, {6.0, 3.0, 4.0}};
+  const av::SpatialField field = av::makeFieldGrid(bounds, 8, 4, 4);
+
+  EXPECT_EQ(field.nx, 8);
+  EXPECT_EQ(field.ny, 4);
+  EXPECT_EQ(field.nz, 4);
+  EXPECT_DOUBLE_EQ(field.origin.x, 0.0);
+  EXPECT_DOUBLE_EQ(field.origin.y, 0.0);
+  EXPECT_DOUBLE_EQ(field.origin.z, 0.0);
+  // Cubic cells cover the largest per-axis step: max(6/8, 3/4, 4/4) = 1.0.
+  EXPECT_DOUBLE_EQ(field.cellSize, 1.0);
+  EXPECT_DOUBLE_EQ(field.bandHz, 0.0);
+  EXPECT_EQ(field.unit, "energy");
+  ASSERT_EQ(field.values.size(), field.cellCount());
+  for (float value : field.values) {
+    EXPECT_FLOAT_EQ(value, 0.0F);
+  }
+}
+
+TEST(SpatialField, MakeFieldGridClampsDims) {
+  const av::Aabb bounds{{0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}};
+  const av::SpatialField field = av::makeFieldGrid(bounds, 0, 1000, 5);
+  EXPECT_EQ(field.nx, 1);
+  EXPECT_EQ(field.ny, av::kMaxFieldDim);
+  EXPECT_EQ(field.nz, 5);
+  EXPECT_EQ(field.values.size(), field.cellCount());
+}
+
+TEST(SpatialField, DepositEnergyInsideAndOutside) {
+  const av::Aabb bounds{{0.0, 0.0, 0.0}, {1.0, 1.0, 1.0}};
+  av::SpatialField field = av::makeFieldGrid(bounds, 2, 2, 2);
+  ASSERT_DOUBLE_EQ(field.cellSize, 0.5);
+
+  av::depositEnergy(field, {0.1, 0.1, 0.1}, 3.0);
+  av::depositEnergy(field, {0.6, 0.1, 0.1}, 1.5);
+  // Both points in cell (0,0,0) and (1,0,0) respectively.
+  EXPECT_FLOAT_EQ(field.values[field.index(0, 0, 0)], 3.0F);
+  EXPECT_FLOAT_EQ(field.values[field.index(1, 0, 0)], 1.5F);
+
+  // Outside the grid: no-op.
+  av::depositEnergy(field, {-0.1, 0.1, 0.1}, 9.0);
+  av::depositEnergy(field, {0.1, 0.1, 1.2}, 9.0);
+  EXPECT_FLOAT_EQ(field.values[field.index(0, 0, 0)], 3.0F);
+  EXPECT_FLOAT_EQ(field.values[field.index(0, 0, 1)], 0.0F);
+}

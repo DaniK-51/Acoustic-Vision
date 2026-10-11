@@ -289,6 +289,20 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
         return res;
       });
 
+  CROW_ROUTE(app, "/v1/jobs/<str>/field").methods(crow::HTTPMethod::Get)(
+      [&jobs](const std::string& id) {
+        const std::optional<av::JobStatus> status = jobs.status(id);
+        if (!status.has_value()) {
+          return problemRes(404, "job not found", id);
+        }
+        if (!status->result.has_value() ||
+            !status->result->field.has_value()) {
+          return problemRes(404, "field not available",
+                            "job " + id + " has no field artifact");
+        }
+        return jsonRes(200, av::fieldToJson(*status->result->field));
+      });
+
   CROW_WEBSOCKET_ROUTE(app, "/v1/events")
       .onopen([&hub](crow::websocket::connection& conn) { hub.add(conn); })
       .onmessage([&hub](crow::websocket::connection& conn,

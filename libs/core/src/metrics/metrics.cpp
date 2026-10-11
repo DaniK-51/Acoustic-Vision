@@ -210,4 +210,43 @@ std::map<double, Rt60> analyticRt60(const RectRoom& room,
   return out;
 }
 
+SpatialField makeFieldGrid(const Aabb& bounds, int nx, int ny, int nz) {
+  SpatialField field;
+  field.nx = std::clamp(nx, 1, kMaxFieldDim);
+  field.ny = std::clamp(ny, 1, kMaxFieldDim);
+  field.nz = std::clamp(nz, 1, kMaxFieldDim);
+  field.origin = bounds.min;
+
+  const double ex = std::max(0.0, bounds.max.x - bounds.min.x);
+  const double ey = std::max(0.0, bounds.max.y - bounds.min.y);
+  const double ez = std::max(0.0, bounds.max.z - bounds.min.z);
+  // Cubic cells: one size must cover the room on every axis, so take the
+  // largest per-axis step (cells overshoot on the smaller axes).
+  field.cellSize =
+      std::max({ex / static_cast<double>(field.nx),
+                ey / static_cast<double>(field.ny),
+                ez / static_cast<double>(field.nz)});
+  field.bandHz = 0.0;
+  field.unit = "energy";
+  field.values.assign(field.cellCount(), 0.0F);
+  return field;
+}
+
+void depositEnergy(SpatialField& field, const Vec3& p, double energy) {
+  if (field.cellSize <= 0.0 || field.values.empty()) {
+    return;
+  }
+  const double gx = (p.x - field.origin.x) / field.cellSize;
+  const double gy = (p.y - field.origin.y) / field.cellSize;
+  const double gz = (p.z - field.origin.z) / field.cellSize;
+  const int x = static_cast<int>(std::floor(gx));
+  const int y = static_cast<int>(std::floor(gy));
+  const int z = static_cast<int>(std::floor(gz));
+  if (x < 0 || y < 0 || z < 0 || x >= field.nx || y >= field.ny ||
+      z >= field.nz) {
+    return;
+  }
+  field.values[field.index(x, y, z)] += static_cast<float>(energy);
+}
+
 }  // namespace av

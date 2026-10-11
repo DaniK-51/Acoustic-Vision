@@ -72,6 +72,25 @@ void writeMetricsJson(const std::filesystem::path& path, const Result& result) {
       path);
 }
 
+nlohmann::json fieldToJson(const SpatialField& field) {
+  nlohmann::json json;
+  json["nx"] = field.nx;
+  json["ny"] = field.ny;
+  json["nz"] = field.nz;
+  json["origin"] = nlohmann::json::array({field.origin.x, field.origin.y,
+                                          field.origin.z});
+  json["cellSize"] = field.cellSize;
+  json["bandHz"] = field.bandHz;
+  json["unit"] = field.unit;
+  json["values"] = field.values;
+  return json;
+}
+
+void writeFieldJson(const std::filesystem::path& path, const Result& result) {
+  writeJsonFile(result.field ? fieldToJson(*result.field) : nlohmann::json{},
+                path);
+}
+
 nlohmann::json resultToJson(const Result& result) {
   nlohmann::json json;
   json["metrics"] =
@@ -84,6 +103,9 @@ nlohmann::json resultToJson(const Result& result) {
     ir["channelNames"] = result.ir->channelNames;
     ir["bandsHz"] = result.ir->bandsHz;
     json["ir"] = std::move(ir);
+  }
+  if (result.field) {
+    json["field"] = fieldToJson(*result.field);
   }
   return json;
 }

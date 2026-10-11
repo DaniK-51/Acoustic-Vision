@@ -161,7 +161,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - `EDT`: 0 → −10 dB fit.
 - `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, (optional) path polyline for GUI.
 - `IrExport`: WAV (float32 PCM) + CSV (time, amplitude per channel/band).
-- `SpatialField`: level/energy on a 3D grid (or surfaces) per band — for heat-maps and “where sound is strong”. Progressive/chunked for interactive UX.
+- `SpatialField`: energy density on a regular cubic 3D grid — `nx,ny,nz`, `origin`, `cellSize`, `bandHz` (0 = broadband), linear `values` (index `x + nx*(y + ny*z)`); for heat-maps and “where sound is strong”. Stored linear (`unit: "energy"`); dB conversion happens at the API/UI edge. Engines advertise the `field` artifact and fill it when `params.fieldGrid` is set (ray-tracing deposits ray energy into the cells); others leave `Result.field` empty.
 
 ### runs (history)
 - A **run** = scenario snapshot + engine + params + result id.
@@ -287,12 +287,13 @@ REST polling (`GET /jobs/{id}`) is the fallback; WS is progressive enhancement.
     "bandsHz": [250, 500, 1000, 2000, 4000],
     "speedOfSound": 343.0,
     "capturePaths": true,
-    "airAbsorption": false
+    "airAbsorption": false,
+    "fieldGrid": { "enabled": true, "nx": 32, "ny": 16, "nz": 24 }
   }
 }
 ```
 
-Result sketch: `{ simulationId, jobId, metrics: { rt60: { "500": { schroederT30, sabine, eyring }, ... }, edt: {...}, earlyReflections: [{ t, amp, order, path? }] }, ir: { sampleRate, durationSec, channels, urls } }`.
+Result sketch: `{ simulationId, jobId, metrics: { rt60: { "500": { schroederT30, sabine, eyring }, ... }, edt: {...}, earlyReflections: [{ t, amp, order, path? }] }, ir: { sampleRate, durationSec, channels, urls }, field: { nx, ny, nz, origin, cellSize, bandHz, unit, values } }`.
 
 Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; API validates against schema before enqueue.
 

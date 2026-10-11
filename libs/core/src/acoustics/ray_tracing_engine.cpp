@@ -163,7 +163,7 @@ class RayTracingEngine : public IEngine {
                              {"minimum", 0},
                              {"default", 64}}}}},
         {"additionalProperties", false}};
-    desc.artifacts = {"metrics", "ir", "rays"};
+    desc.artifacts = {"metrics", "ir", "rays", "field"};
     return desc;
   }
 
@@ -200,6 +200,17 @@ class RayTracingEngine : public IEngine {
       result.warnings.emplace_back(
           "signedIr is not produced; output is an unsigned energy envelope");
     }
+    if (scenario.params.fieldGrid.enabled) {
+      const FieldGridParams& grid = scenario.params.fieldGrid;
+      if (grid.nx <= 0 || grid.ny <= 0 || grid.nz <= 0) {
+        result.errors.emplace_back("fieldGrid requires positive nx, ny, nz");
+      } else if (grid.nx > kMaxFieldDim || grid.ny > kMaxFieldDim ||
+                 grid.nz > kMaxFieldDim) {
+        result.warnings.emplace_back(
+            "fieldGrid dims exceed kMaxFieldDim (" +
+            std::to_string(kMaxFieldDim) + "); values will be clamped");
+      }
+    }
     result.ok = result.errors.empty();
     return result;
   }
@@ -225,6 +236,17 @@ class RayTracingEngine : public IEngine {
 
     const RtMethodParams rt = parseMethodParams(params);
     const Bvh bvh(*mesh);
+
+    // Optional spatial field: cubic grid over the mesh AABB, filled by
+    // depositing ray path energy during tracing (see deposit below).
+    SpatialField field;
+    bool wantField = params.fieldGrid.enabled && params.fieldGrid.nx > 0 &&
+                     params.fieldGrid.ny > 0 && params.fieldGrid.nz > 0;
+    if (wantField) {
+      field = makeFieldGrid(boundsOf(*mesh), params.fieldGrid.nx,
+                            params.fieldGrid.ny, params.fieldGrid.nz);
+      wantField = field.cellSize > 0.0;
+    }
 
     const std::size_t sourceCount = scenario.sources.size();
     const std::size_t receiverCount = scenario.receivers.size();
@@ -323,6 +345,25 @@ class RayTracingEngine : public IEngine {
                 static_cast<float>(energy);
           }
 
+          // Field deposit: Riemann sum of pathEnergy/L^2 along the segment
+          // (the same 1/r^2 energy convention as the receiver spheres),
+          // sampled about once per cell-length of path.
+          if (wantField) {
+            const double segLen = hit.t;
+            const int samples = std::max(
+                1, static_cast<int>(std::ceil(segLen / field.cellSize)));
+            const double step = segLen / static_cast<double>(samples);
+            for (int i = 0; i < samples; ++i) {
+              const double tSample = step * (static_cast<double>(i) + 0.5);
+              const double L = pathLength + tSample;
+              if (L <= 1e-9) {
+                continue;
+              }
+              depositEnergy(field, origin + direction * tSample,
+                            pathEnergy / (L * L) * step);
+            }
+          }
+
           pathLength += hit.t;
           origin = hit.position;
           if (capturePaths) {
@@ -370,6 +411,19 @@ class RayTracingEngine : public IEngine {
       for (float& sample : ir.samples) {
         sample *= inv;
       }
+    }
+
+    // Same Monte Carlo mean for the field, additionally per cell volume so
+    // the stored value is an energy *density* (linear, not dB).
+    if (wantField && totalRays > 0) {
+      const double cellVolume =
+          field.cellSize * field.cellSize * field.cellSize;
+      const double inv =
+          1.0 / (static_cast<double>(totalRays) * cellVolume);
+      for (float& value : field.values) {
+        value *= static_cast<float>(inv);
+      }
+      result.field = std::move(field);
     }
 
     Metrics metrics;

@@ -93,6 +93,11 @@ int runScenario(const std::filesystem::path& scenarioPath,
     av::writeWav(path, *result.ir);
     std::cout << "wrote " << path.string() << '\n';
   }
+  if (result.field) {
+    const std::filesystem::path path = outDir / "field.json";
+    av::writeFieldJson(path, result);
+    std::cout << "wrote " << path.string() << '\n';
+  }
   return 0;
 }
 

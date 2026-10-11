@@ -80,7 +80,7 @@ REGISTER_ENGINE(ImageSourceEngine);
 |----|--------|---------|--------|------|
 | `sabine-eyring` | Аналитика T=0.161·V/(S·ᾱ) | любые (V, S, α) | RT60 | P0 |
 | `image-source` | Зеркальные источники | rect | IR, метрики, ранние пути | P0 |
-| `ray-tracing` | Лучи + BVH | mesh | IR, метрики, paths | P2 |
+| `ray-tracing` | Лучи + BVH | mesh | IR, метрики, paths, поле | P2 |
 | `hybrid` | ISM early + RT late | mesh | полное IR | P2 |
 | `fdtd` / моды | Волновое | small rect | LF-моды | later / plugin |
 

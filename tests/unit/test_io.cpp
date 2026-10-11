@@ -216,3 +216,67 @@ TEST(Io, MetricsJsonContainsSabineKey) {
   EXPECT_TRUE(fromFile["rt60"]["500"].contains("sabine"));
   std::filesystem::remove(path);
 }
+
+TEST(Io, FieldGridParamsRoundTrip) {
+  av::Scenario scenario = makeShoeboxScenario();
+  scenario.params.fieldGrid = {.enabled = true, .nx = 8, .ny = 4, .nz = 6};
+
+  const nlohmann::json json = av::scenarioToJson(scenario);
+  ASSERT_TRUE(json["params"].contains("fieldGrid"));
+  EXPECT_TRUE(json["params"]["fieldGrid"]["enabled"].get<bool>());
+  EXPECT_EQ(json["params"]["fieldGrid"]["nx"].get<int>(), 8);
+
+  const av::Scenario back = av::scenarioFromJson(json);
+  EXPECT_TRUE(back.params.fieldGrid.enabled);
+  EXPECT_EQ(back.params.fieldGrid.nx, 8);
+  EXPECT_EQ(back.params.fieldGrid.ny, 4);
+  EXPECT_EQ(back.params.fieldGrid.nz, 6);
+
+  // Absent by default (schema keeps fieldGrid optional).
+  const av::Scenario plain = makeShoeboxScenario();
+  EXPECT_FALSE(av::scenarioToJson(plain)["params"].contains("fieldGrid"));
+  EXPECT_FALSE(plain.params.fieldGrid.enabled);
+}
+
+TEST(Io, FieldToJsonShapeAndWrite) {
+  av::SpatialField field;
+  field.nx = 2;
+  field.ny = 2;
+  field.nz = 1;
+  field.origin = {1.0, 2.0, 3.0};
+  field.cellSize = 0.5;
+  field.bandHz = 0.0;
+  field.unit = "energy";
+  field.values = {0.25F, 0.5F, 0.75F, 1.0F};
+
+  const nlohmann::json json = av::fieldToJson(field);
+  EXPECT_EQ(json["nx"].get<int>(), 2);
+  EXPECT_EQ(json["ny"].get<int>(), 2);
+  EXPECT_EQ(json["nz"].get<int>(), 1);
+  ASSERT_TRUE(json["origin"].is_array());
+  EXPECT_EQ(json["origin"].size(), 3U);
+  EXPECT_DOUBLE_EQ(json["origin"][0].get<double>(), 1.0);
+  EXPECT_DOUBLE_EQ(json["cellSize"].get<double>(), 0.5);
+  EXPECT_DOUBLE_EQ(json["bandHz"].get<double>(), 0.0);
+  EXPECT_EQ(json["unit"].get<std::string>(), "energy");
+  ASSERT_TRUE(json["values"].is_array());
+  EXPECT_EQ(json["values"].size(), 4U);
+  EXPECT_FLOAT_EQ(json["values"][2].get<float>(), 0.75F);
+
+  av::Result result;
+  result.field = field;
+  const nlohmann::json full = av::resultToJson(result);
+  ASSERT_TRUE(full.contains("field"));
+  EXPECT_EQ(full["field"]["nx"].get<int>(), 2);
+  EXPECT_EQ(full["field"]["values"].size(), 4U);
+
+  const std::filesystem::path path = tempPath("field.json");
+  av::writeFieldJson(path, result);
+  std::ifstream input(path);
+  const nlohmann::json fromFile = nlohmann::json::parse(input);
+  EXPECT_EQ(fromFile["values"].size(), 4U);
+  std::filesystem::remove(path);
+
+  // No field -> no "field" key in the result JSON.
+  EXPECT_FALSE(av::resultToJson(av::Result{}).contains("field"));
+}

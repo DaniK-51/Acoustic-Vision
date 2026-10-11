@@ -108,7 +108,16 @@
         "capturePaths": { "type": "boolean" },
         "airAbsorption": { "type": "boolean" },
         "signedIr": { "type": "boolean" },
-        "methodParams": { "type": "object" }
+        "methodParams": { "type": "object" },
+        "fieldGrid": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "nx": { "type": "integer", "minimum": 1, "maximum": 64 },
+            "ny": { "type": "integer", "minimum": 1, "maximum": 64 },
+            "nz": { "type": "integer", "minimum": 1, "maximum": 64 }
+          }
+        }
       }
     }
   }

@@ -106,7 +106,7 @@ TEST(RayTracingEngine, DescriptorArtifactsAndCaps) {
   EXPECT_FALSE(desc.caps.supportsRect);
   EXPECT_TRUE(desc.caps.supportsRayPaths);
   EXPECT_EQ(desc.artifacts,
-            (std::vector<std::string>{"metrics", "ir", "rays"}));
+            (std::vector<std::string>{"metrics", "ir", "rays", "field"}));
   EXPECT_TRUE(desc.paramsSchema.is_object());
   EXPECT_TRUE(desc.paramsSchema.contains("properties"));
 }
@@ -381,4 +381,136 @@ TEST(RayTracingEngine, ProgressIsCoarseAndCompletes) {
   EXPECT_DOUBLE_EQ(fractions.back(), 1.0);
   // Coarse: roughly per-10% steps, not per-ray.
   EXPECT_LT(fractions.size(), 20U);
+}
+
+TEST(RayTracingEngine, FieldFilledWhenEnabled) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  scenario.params.fieldGrid = {.enabled = true, .nx = 8, .ny = 4, .nz = 6};
+  scenario.params.methodParams["rayCount"] = 500;
+  ASSERT_TRUE(engine->validate(scenario).ok);
+
+  const av::Result result =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(result.field.has_value());
+  const av::SpatialField& field = *result.field;
+
+  EXPECT_EQ(field.nx, 8);
+  EXPECT_EQ(field.ny, 4);
+  EXPECT_EQ(field.nz, 6);
+  EXPECT_EQ(field.values.size(), field.cellCount());
+  EXPECT_EQ(field.values.size(), 8U * 4U * 6U);
+  EXPECT_EQ(field.unit, "energy");
+  EXPECT_DOUBLE_EQ(field.bandHz, 0.0);
+  EXPECT_DOUBLE_EQ(field.cellSize, 6.0 / 8.0);  // max(6/8, 3/4, 4/6)
+  EXPECT_DOUBLE_EQ(field.origin.x, 0.0);
+  EXPECT_DOUBLE_EQ(field.origin.y, 0.0);
+  EXPECT_DOUBLE_EQ(field.origin.z, 0.0);
+
+  double total = 0.0;
+  for (float value : field.values) {
+    EXPECT_TRUE(std::isfinite(value));
+    EXPECT_GE(value, 0.0F);
+    total += static_cast<double>(value);
+  }
+  EXPECT_GT(total, 0.0);
+}
+
+TEST(RayTracingEngine, FieldEmptyWhenDisabled) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  EXPECT_FALSE(scenario.params.fieldGrid.enabled);
+  const av::Result result =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  EXPECT_FALSE(result.field.has_value());
+}
+
+TEST(RayTracingEngine, FieldDimsClampedWithWarning) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  scenario.params.fieldGrid = {.enabled = true, .nx = 128, .ny = 8, .nz = 8};
+  scenario.params.methodParams["rayCount"] = 100;
+
+  const av::ValidateResult validation = engine->validate(scenario);
+  EXPECT_TRUE(validation.ok);
+  ASSERT_FALSE(validation.warnings.empty());
+
+  const av::Result result =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(result.field.has_value());
+  EXPECT_EQ(result.field->nx, av::kMaxFieldDim);
+  EXPECT_EQ(result.field->ny, 8);
+  EXPECT_EQ(result.field->nz, 8);
+  EXPECT_EQ(result.field->values.size(), result.field->cellCount());
+}
+
+TEST(RayTracingEngine, FieldValidateErrorsOnNonPositiveDims) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  scenario.params.fieldGrid = {.enabled = true, .nx = 0, .ny = 4, .nz = 4};
+  const av::ValidateResult result = engine->validate(scenario);
+  EXPECT_FALSE(result.ok);
+  ASSERT_FALSE(result.errors.empty());
+}
+
+TEST(RayTracingEngine, FieldFiniteOnObjFixture) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("ray-tracing");
+  ASSERT_NE(engine, nullptr);
+
+  const av::MeshRoom room{
+      .uri = (std::filesystem::path(AV_FIXTURES_DIR) / "box.obj").string(),
+      .unit = "m",
+      .scale = 1.0,
+      .materialOverrides = {{"floor", "mat-carpet"},
+                            {"ceiling", "mat-carpet"},
+                            {"walls", "mat-carpet"}},
+  };
+  av::Scenario scenario;
+  scenario.room.type = av::Room::Type::Mesh;
+  scenario.room.mesh = room;
+  scenario.materials.push_back(
+      makeMaterial("mat-carpet", {0.10, 0.20, 0.30, 0.40, 0.40, 0.40}));
+  scenario.loadedMesh = std::make_shared<av::Mesh>(av::loadMeshRoom(room));
+
+  av::Source source;
+  source.id = "src-1";
+  source.position = {0.3, 0.5, 0.3};
+  scenario.sources.push_back(source);
+  av::Receiver receiver;
+  receiver.id = "rcv-1";
+  receiver.position = {0.7, 0.5, 0.7};
+  scenario.receivers.push_back(receiver);
+
+  scenario.params.engine = "ray-tracing";
+  scenario.params.sampleRate = 8000;
+  scenario.params.durationSec = 0.4;
+  scenario.params.fieldGrid = {.enabled = true, .nx = 6, .ny = 6, .nz = 6};
+  scenario.params.methodParams = nlohmann::json{
+      {"rayCount", 400}, {"maxBounces", 16}, {"seed", 5}};
+
+  ASSERT_TRUE(engine->validate(scenario).ok);
+  const av::Result result =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(result.field.has_value());
+  const av::SpatialField& field = *result.field;
+  EXPECT_EQ(field.values.size(), 216U);
+  double total = 0.0;
+  for (float value : field.values) {
+    ASSERT_TRUE(std::isfinite(value));
+    total += value;
+  }
+  EXPECT_GT(total, 0.0);
 }
