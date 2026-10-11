@@ -39,16 +39,16 @@ void appendF32(std::vector<std::uint8_t>& out, float value) {
 
 }  // namespace
 
-void writeWav(const std::filesystem::path& path, const IrBuffer& ir) {
+std::vector<std::uint8_t> encodeWav(const IrBuffer& ir) {
   if (ir.channels == 0) {
-    throw std::runtime_error("writeWav: IrBuffer has no channels");
+    throw std::runtime_error("encodeWav: IrBuffer has no channels");
   }
   if (!(ir.sampleRate > 0.0)) {
-    throw std::runtime_error("writeWav: sampleRate must be positive");
+    throw std::runtime_error("encodeWav: sampleRate must be positive");
   }
   if (ir.samples.size() % ir.channels != 0) {
     throw std::runtime_error(
-        "writeWav: samples size not divisible by channel count");
+        "encodeWav: samples size not divisible by channel count");
   }
   const std::size_t sampleCount = ir.samples.size() / ir.channels;
   // RIFF sizes are uint32; samples are 4 bytes each plus the fixed header.
@@ -56,7 +56,7 @@ void writeWav(const std::filesystem::path& path, const IrBuffer& ir) {
       (static_cast<std::size_t>((std::numeric_limits<std::uint32_t>::max)()) -
        58u) /
           4u) {
-    throw std::runtime_error("writeWav: IR too large for a RIFF container");
+    throw std::runtime_error("encodeWav: IR too large for a RIFF container");
   }
 
   const std::uint32_t sampleRateU32 =
@@ -99,7 +99,11 @@ void writeWav(const std::filesystem::path& path, const IrBuffer& ir) {
       appendF32(bytes, ir.samples[channel * sampleCount + i]);
     }
   }
+  return bytes;
+}
 
+void writeWav(const std::filesystem::path& path, const IrBuffer& ir) {
+  const std::vector<std::uint8_t> bytes = encodeWav(ir);
   std::ofstream output(path, std::ios::binary);
   if (!output) {
     throw std::runtime_error("cannot write WAV file: " + path.string());

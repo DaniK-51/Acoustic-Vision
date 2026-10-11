@@ -13,7 +13,8 @@
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-x64-debug",
       "cacheVariables": {
-        "AV_BUILD_TESTS": "ON"
+        "AV_BUILD_TESTS": "ON",
+        "AV_BUILD_API": "ON"
       },
       "condition": {
         "type": "equals",
@@ -28,7 +29,8 @@
       "architecture": "x64",
       "binaryDir": "${sourceDir}/build/windows-msvc-x64-release",
       "cacheVariables": {
-        "AV_BUILD_TESTS": "ON"
+        "AV_BUILD_TESTS": "ON",
+        "AV_BUILD_API": "ON"
       },
       "condition": {
         "type": "equals",
@@ -43,7 +45,8 @@
       "binaryDir": "${sourceDir}/build/linux-debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "AV_BUILD_TESTS": "ON"
+        "AV_BUILD_TESTS": "ON",
+        "AV_BUILD_API": "ON"
       },
       "condition": {
         "type": "notEquals",

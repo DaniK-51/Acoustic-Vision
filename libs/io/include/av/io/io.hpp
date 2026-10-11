@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
@@ -23,6 +25,9 @@ void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
 // samples are interleaved on write. Channel count and sample rate must be
 // positive; throws std::runtime_error otherwise or on IO failure.
 void writeWav(const std::filesystem::path& path, const IrBuffer& ir);
+
+// Same container as writeWav, encoded to memory (API ir.wav endpoint).
+[[nodiscard]] std::vector<std::uint8_t> encodeWav(const IrBuffer& ir);
 
 // Metrics JSON: rt60 {schroederT30, sabine, eyring} per band, edt per band,
 // earlyReflections list. Band 0 is broadband (Metrics convention).

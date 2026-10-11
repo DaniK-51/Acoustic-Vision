@@ -33,6 +33,10 @@ add_subdirectory(libs/sim)
 
 add_subdirectory(apps/cli)
 
+if(AV_BUILD_API)
+  add_subdirectory(apps/api)
+endif()
+
 if(AV_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

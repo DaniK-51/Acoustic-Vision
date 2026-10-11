@@ -32,3 +32,20 @@ target_link_libraries(av_unit_tests
 av_set_warnings(av_unit_tests)
 
 gtest_discover_tests(av_unit_tests)
+
+# API smoke: spawn av-api on an ephemeral port (only when the server is built).
+if(AV_BUILD_API AND TARGET av-api)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(
+      NAME api_smoke
+      COMMAND "${Python3_EXECUTABLE}"
+              "${CMAKE_CURRENT_SOURCE_DIR}/integration/api_smoke.py"
+              "$<TARGET_FILE:av-api>"
+              "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/demo-scenario.json"
+    )
+    set_tests_properties(api_smoke PROPERTIES TIMEOUT 120)
+  else()
+    message(STATUS "Python3 not found; api_smoke integration test skipped")
+  endif()
+endif()

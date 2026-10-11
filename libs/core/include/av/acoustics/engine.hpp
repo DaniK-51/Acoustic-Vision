@@ -102,8 +102,13 @@ class EngineRegistry {
 
 }  // namespace av
 
+// Two-level concat so __LINE__ expands before pasting; otherwise every use
+// inside one TU pastes the literal __LINE__ token and collides.
+#define AV_CONCAT_IMPL(a, b) a##b
+#define AV_CONCAT(a, b) AV_CONCAT_IMPL(a, b)
+
 #define AV_REGISTER_ENGINE_IMPL(EngineType, N)                              \
-  static const bool avRegisteredEngine_##N = [] {                           \
+  static const bool AV_CONCAT(avRegisteredEngine_, N) = [] {                \
     ::av::EngineRegistry::instance().add(                                   \
         [] { return std::make_unique<EngineType>(); });                     \
     return true;                                                            \
