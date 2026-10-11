@@ -25,6 +25,7 @@ add_executable(av_unit_tests
   unit/test_gltf_import.cpp
   unit/test_sim.cpp
   unit/test_runs_store.cpp
+  unit/test_source_catalog.cpp
   # Crow-free api helper under test (P2e runs history).
   ${CMAKE_SOURCE_DIR}/apps/api/runs_store.cpp
 )
@@ -35,6 +36,7 @@ target_include_directories(av_unit_tests
 
 target_compile_definitions(av_unit_tests
   PRIVATE AV_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+  PRIVATE AV_SOURCE_CATALOG_DATA="${CMAKE_SOURCE_DIR}/data/source_catalog.json"
 )
 
 target_link_libraries(av_unit_tests
@@ -59,6 +61,7 @@ if(AV_BUILD_API AND TARGET av-api)
               "${CMAKE_CURRENT_SOURCE_DIR}/integration/api_smoke.py"
               "$<TARGET_FILE:av-api>"
               "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/demo-scenario.json"
+              "${CMAKE_SOURCE_DIR}/data/source_catalog.json"
     )
     set_tests_properties(api_smoke PROPERTIES TIMEOUT 120)
   else()

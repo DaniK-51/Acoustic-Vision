@@ -2,7 +2,7 @@
 """av-api integration smoke: spawns the server and exercises /v1 over HTTP + WS.
 
 Stdlib only (urllib, json, socket, base64, struct) so it needs no pip deps.
-Run: api_smoke.py <av-api-binary> <demo-scenario.json>
+Run: api_smoke.py <av-api-binary> <demo-scenario.json> [source_catalog.json]
 """
 
 import base64
@@ -157,9 +157,10 @@ def expect(cond, msg):
 
 
 def main():
-    if len(sys.argv) != 3:
-        fail("usage: api_smoke.py <av-api-binary> <demo-scenario.json>")
+    if len(sys.argv) not in (3, 4):
+        fail("usage: api_smoke.py <av-api-binary> <demo-scenario.json> [source_catalog.json]")
     binary, scenario_path = sys.argv[1], sys.argv[2]
+    catalog_path = sys.argv[3] if len(sys.argv) == 4 else None
     with open(scenario_path) as f:
         scenario = json.load(f)
     fixtures_dir = os.path.dirname(os.path.abspath(scenario_path))
@@ -175,10 +176,14 @@ def main():
 
     port = free_port()
     base = f"http://127.0.0.1:{port}"
+    env = os.environ.copy()
+    if catalog_path:
+        env["AV_SOURCE_CATALOG"] = os.path.abspath(catalog_path)
     server = subprocess.Popen(
         [binary, "--port", str(port), "--bind", "127.0.0.1"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
+        env=env,
     )
     try:
         health = wait_healthy(base)
@@ -204,6 +209,26 @@ def main():
         expect(status == 200, "GET /v1/bands")
         expect(bands.get("bandsHz") == [125, 250, 500, 1000, 2000, 4000], f"bands: {bands}")
         print("ok: bands")
+
+        # Source catalog: always 200 with a disclaimer + sources array.
+        status, catalog = http("GET", f"{base}/v1/source-catalog")
+        expect(status == 200, f"GET /v1/source-catalog: {status} {catalog}")
+        expect(isinstance(catalog.get("disclaimer"), str) and catalog["disclaimer"],
+               f"catalog disclaimer: {catalog}")
+        sources = catalog.get("sources")
+        expect(isinstance(sources, list), f"catalog sources array: {catalog}")
+        if catalog_path:
+            expect(sources, f"catalog non-empty with AV_SOURCE_CATALOG: {catalog}")
+            for entry in sources:
+                for field in ("id", "name", "powerDb", "spectrum", "directivity", "disclaimer"):
+                    expect(field in entry, f"catalog entry field {field}: {entry}")
+                spec = entry["spectrum"]
+                expect(len(spec.get("bandsHz", [])) == len(spec.get("responseDb", [])),
+                       f"catalog spectrum lengths: {entry}")
+                expect(entry["directivity"].get("type") in
+                       ("omni", "dipole", "cardioid", "custom"),
+                       f"catalog directivity type: {entry}")
+        print(f"ok: source catalog ({len(sources)} entries)")
 
         status, result = http("POST", f"{base}/v1/simulations?sync=1", scenario)
         expect(status == 200, f"sync simulation status {status}: {result}")

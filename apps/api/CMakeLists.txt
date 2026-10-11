@@ -60,6 +60,15 @@ target_link_libraries(av-api
 
 av_set_warnings(av-api)
 
+# Built-in source catalog is looked up as source_catalog.json beside the
+# executable (AV_SOURCE_CATALOG overrides the path).
+add_custom_command(TARGET av-api POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_SOURCE_DIR}/data/source_catalog.json"
+          "$<TARGET_FILE_DIR:av-api>/source_catalog.json"
+  COMMENT "Copy source_catalog.json beside av-api"
+)
+
 if(WIN32)
   target_link_libraries(av-api PRIVATE ws2_32 mswsock)
 endif()

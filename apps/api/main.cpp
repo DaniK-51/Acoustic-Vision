@@ -1,6 +1,7 @@
 #include <av/acoustics/builtin_engines.hpp>
 #include <av/acoustics/engine.hpp>
 #include <av/io/io.hpp>
+#include <av/io/source_catalog.hpp>
 #include <av/sim/job_manager.hpp>
 #include <av/units.hpp>
 
@@ -11,6 +12,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -18,6 +20,13 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 #include "api_support.hpp"
 #include "runs_store.hpp"
@@ -35,6 +44,26 @@ crow::response jsonRes(int code, const nlohmann::json& body) {
   res.set_header("Content-Type", "application/json");
   res.body = body.dump();
   return res;
+}
+
+// Directory of the running executable, used to find source_catalog.json
+// beside the binary when AV_SOURCE_CATALOG is unset.
+std::filesystem::path exeDirOf(const char* argv0) {
+#if defined(_WIN32)
+  char buf[MAX_PATH] = {};
+  const DWORD n = GetModuleFileNameA(nullptr, buf, MAX_PATH);
+  if (n > 0 && n < MAX_PATH) {
+    return std::filesystem::path(buf).parent_path();
+  }
+#else
+  std::error_code ec;
+  const std::filesystem::path self =
+      std::filesystem::read_symlink("/proc/self/exe", ec);
+  if (!ec) {
+    return self.parent_path();
+  }
+#endif
+  return std::filesystem::absolute(argv0).parent_path();
 }
 
 crow::response problemRes(int code, std::string title, std::string detail) {
@@ -164,7 +193,8 @@ std::string joinErrors(const std::vector<std::string>& errors) {
 }
 
 void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
-                    av::api::EventHub& hub, av::api::RunsStore& runs) {
+                    av::api::EventHub& hub, av::api::RunsStore& runs,
+                    const av::SourceCatalog& sourceCatalog) {
   CROW_ROUTE(app, "/v1/health").methods(crow::HTTPMethod::Get)([] {
     nlohmann::json engines = nlohmann::json::array();
     for (const av::EngineDescriptor& desc :
@@ -193,6 +223,14 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
                                           av::kDefaultBandsHz.end());
     return jsonRes(200, body);
   });
+
+  // Read-only built-in device catalog (docs/idea.md decision 6: data as-is,
+  // disclaimer required). Always 200 — empty list when no catalog file was
+  // found/loaded at startup.
+  CROW_ROUTE(app, "/v1/source-catalog")
+      .methods(crow::HTTPMethod::Get)([&sourceCatalog] {
+        return jsonRes(200, av::sourceCatalogToJson(sourceCatalog));
+      });
 
   CROW_ROUTE(app, "/v1/simulations").methods(crow::HTTPMethod::Post)(
       [&jobs, &runs](const crow::request& req) {
@@ -409,13 +447,18 @@ int main(int argc, char** argv) {
 
   av::linkBuiltinEngines();
 
+  // Source catalog is loaded once at startup (read-only); engines/JobManager
+  // never see it.
+  const av::SourceCatalog sourceCatalog =
+      av::loadDefaultSourceCatalog(exeDirOf(argv[0]));
+
   av::JobManager jobs;
   av::api::EventHub hub;
   av::api::RunsStore runs;
   JobWatcher watcher(jobs, hub, runs);
 
   crow::SimpleApp app;
-  registerRoutes(app, jobs, hub, runs);
+  registerRoutes(app, jobs, hub, runs, sourceCatalog);
   watcher.start();
 
   std::cout << "av-api listening on http://" << bindAddr << ':' << port

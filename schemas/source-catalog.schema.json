@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acoustic-vision.local/schemas/source-catalog.schema.json",
+  "title": "Acoustic-Vision Source Catalog",
+  "description": "Built-in loudspeaker/source cards, consumed as-is. Values are fact-shaped placeholders (typical public datasheet-style), not verified vendor data — see the required disclaimer fields.",
+  "type": "object",
+  "required": ["disclaimer", "sources"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "disclaimer": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Catalog-wide disclaimer; always present in GET /v1/source-catalog."
+    },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "required": ["id", "name", "powerDb", "spectrum", "directivity", "disclaimer"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "manufacturer": {
+          "type": "string",
+          "description": "Optional. Omit for generic/placeholder cards."
+        },
+        "category": {
+          "type": "string",
+          "description": "Free-form grouping, e.g. studio-monitor | pa | omni | dipole."
+        },
+        "powerDb": {
+          "type": "number",
+          "description": "Rated/typical maximum sound pressure level in dB SPL referenced to 1 m on-axis (NOT electrical watts). Example values only."
+        },
+        "spectrum": {
+          "type": "object",
+          "required": ["bandsHz", "responseDb"],
+          "description": "Relative level offsets (dB) of the source against its broadband powerDb, one value per band.",
+          "properties": {
+            "bandsHz": {
+              "type": "array",
+              "items": { "type": "number", "exclusiveMinimum": 0 },
+              "minItems": 1
+            },
+            "responseDb": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 1,
+              "description": "Same length as bandsHz."
+            }
+          }
+        },
+        "directivity": {
+          "type": "object",
+          "required": ["type"],
+          "properties": {
+            "type": { "enum": ["omni", "dipole", "cardioid", "custom"] },
+            "description": { "type": "string" }
+          }
+        },
+        "notes": { "type": "string" },
+        "sourceUrl": {
+          "type": "string",
+          "description": "Optional reference URL; omit rather than invent one."
+        },
+        "disclaimer": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Per-card disclaimer (required)."
+        }
+      }
+    }
+  }
+}

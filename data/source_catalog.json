@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "disclaimer": "example specs, not verified vendor data",
+  "sources": [
+    {
+      "id": "generic-studio-monitor",
+      "name": "Generic 2-way Studio Monitor (example)",
+      "category": "studio-monitor",
+      "powerDb": 106.0,
+      "spectrum": {
+        "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+        "responseDb": [0.0, 0.5, 0.0, 0.0, -0.5, -1.5]
+      },
+      "directivity": {
+        "type": "cardioid",
+        "description": "Typical nearfield monitor forward radiation; simplified cardioid model."
+      },
+      "notes": "powerDb = typical max SPL in dB SPL @ 1 m on-axis, not electrical watts. Example card for the built-in catalog.",
+      "disclaimer": "example specs, not verified vendor data"
+    },
+    {
+      "id": "generic-pa-top",
+      "name": "Generic 12\" PA Top (example)",
+      "category": "pa",
+      "powerDb": 128.0,
+      "spectrum": {
+        "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+        "responseDb": [1.0, 0.5, 0.0, 0.0, 0.5, -1.0]
+      },
+      "directivity": {
+        "type": "cardioid",
+        "description": "Point-source PA top, nominal 90x60 horn; simplified cardioid model for simulation."
+      },
+      "notes": "powerDb = typical max SPL in dB SPL @ 1 m on-axis, not electrical watts. Example card for the built-in catalog.",
+      "disclaimer": "example specs, not verified vendor data"
+    },
+    {
+      "id": "generic-omni-source",
+      "name": "Generic Omni Point Source (example)",
+      "category": "omni",
+      "powerDb": 120.0,
+      "spectrum": {
+        "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+        "responseDb": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      },
+      "directivity": {
+        "type": "omni",
+        "description": "Ideal omnidirectional radiator (e.g. spherical array / dodecahedron-style loudspeaker)."
+      },
+      "notes": "powerDb = typical max SPL in dB SPL @ 1 m, not electrical watts. Useful as a reference source in simulations; this is not a measurement device card.",
+      "disclaimer": "example specs, not verified vendor data"
+    },
+    {
+      "id": "generic-dipole",
+      "name": "Generic Open-Baffle Dipole (example)",
+      "category": "dipole",
+      "powerDb": 100.0,
+      "spectrum": {
+        "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+        "responseDb": [-2.0, -1.0, 0.0, 0.0, -1.0, -3.0]
+      },
+      "directivity": {
+        "type": "dipole",
+        "description": "Figure-of-eight radiation of an open-baffle loudspeaker."
+      },
+      "notes": "powerDb = typical max SPL in dB SPL @ 1 m on-axis, not electrical watts. Example card for the built-in catalog.",
+      "disclaimer": "example specs, not verified vendor data"
+    }
+  ]
+}
