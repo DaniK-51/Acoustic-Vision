@@ -36,7 +36,7 @@ Mesh loadMesh(const std::filesystem::path& path, const std::string& unit,
 }
 
 Mesh loadMeshRoom(const MeshRoom& room) {
-  Mesh mesh = loadMesh(detail::meshUriToPath(room.uri), room.unit, room.scale);
+  Mesh mesh = loadMesh(detail::resolveMeshUri(room.uri), room.unit, room.scale);
   applyMaterialOverrides(mesh, room.materialOverrides);
   return mesh;
 }
@@ -53,10 +53,7 @@ void fillLoadedMesh(Scenario& scenario, const std::filesystem::path& baseDir) {
     return;
   }
 
-  std::filesystem::path path = detail::meshUriToPath(uri);
-  if (path.is_relative() && !baseDir.empty()) {
-    path = baseDir / path;
-  }
+  const std::filesystem::path path = detail::resolveMeshUri(uri, baseDir);
 
   try {
     Mesh mesh = loadMesh(path, scenario.room.mesh.unit, scenario.room.mesh.scale);

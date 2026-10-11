@@ -38,4 +38,16 @@ inline std::filesystem::path meshUriToPath(const std::string& uri) {
   return std::filesystem::path(value);
 }
 
+// uri -> filesystem path, relative paths joined with `baseDir` when non-empty
+// (CLI passes the scenario directory, API the CWD). Absolute paths and
+// empty baseDir leave the result as meshUriToPath would produce.
+inline std::filesystem::path resolveMeshUri(
+    const std::string& uri, const std::filesystem::path& baseDir = {}) {
+  std::filesystem::path path = meshUriToPath(uri);
+  if (path.is_relative() && !baseDir.empty()) {
+    path = baseDir / path;
+  }
+  return path;
+}
+
 }  // namespace av::detail

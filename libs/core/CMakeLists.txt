@@ -6,6 +6,7 @@ add_library(av_core
   src/geometry/bvh.cpp
   src/acoustics/engine.cpp
   src/acoustics/builtin_engines.cpp
+  src/acoustics/rt_core.cpp
   src/acoustics/sabine_eyring_engine.cpp
   src/acoustics/image_source_engine.cpp
   src/acoustics/ray_tracing_engine.cpp

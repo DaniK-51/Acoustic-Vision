@@ -61,7 +61,7 @@ Acoustic-Vision/
 ```
 
 **Dependency direction** (strict, enforced by CMake `target_link_libraries`):
-`av_core` ← `av_io` ← `av_sim` ← (`av-cli`, `av-api`). GUI (P3) talks only to `av-api` over HTTP/WS — never links the core.
+`av_core` ← `av_io`; `av_core` ← `av_sim` (`av_sim` does not link `av_io`); `av-cli` → `av_io`, `av-api` → `av_sim` + `av_io`. GUI (P3) talks only to `av-api` over HTTP/WS — never links the core.
 
 ---
 
@@ -139,7 +139,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 | `sabine-eyring` | analytic RT60 from V, S, ᾱ(f) | no IR; metrics only; instant |
 | `image-source` | IR for **rectangular** rooms, order N | classical mirror-source; per-band IR |
 | `ray-tracing` | IR + ray paths for **mesh** rooms | P2; same `IEngine` |
-| `hybrid` | ISM early + RT late | P2; full IR on mesh |
+| `hybrid` | one RT pass, early/late split | P2; full IR on mesh |
 
 `EngineRegistry` selects by `simParams.engine` + room type; API returns `400` if engine/capability mismatch (e.g. IMS + mesh).
 

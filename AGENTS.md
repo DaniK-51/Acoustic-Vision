@@ -59,7 +59,7 @@ tests/unit    # GoogleTest
 schemas/      # JSON Schema
 ```
 
-Зависимости: `av_core` ← `av_io` ← `av_sim` ← (`av-cli`, `av-api`). Запрет обратных и циклических линков.
+Зависимости: `av_core` ← `av_io`; `av_core` ← `av_sim` (`av_sim` **не** зависит от `av_io`); `av-cli` → `av_io`, `av-api` → `av_sim` + `av_io`. Запрет обратных и циклических линков.
 
 ### C++ стиль
 
