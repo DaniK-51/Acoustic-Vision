@@ -98,7 +98,7 @@ void RunsStore::noteSubmitted(const JobId& jobId, std::string engine,
                               std::string scenarioName,
                               nlohmann::json paramsDigest,
                               Clock::time_point submittedAt,
-                              std::optional<std::string> sceneVersion) {
+                              std::optional<std::uint64_t> sceneVersion) {
   std::lock_guard lock(m_mutex);
   Pending pending;
   pending.engine = std::move(engine);

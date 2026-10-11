@@ -338,7 +338,15 @@ def main():
         expect(status == 404 and body.get("status") == 404, f"scene 404: {status} {body}")
         print("ok: scene get + 404")
 
+        # P3c: two connections — requester + subscribeScene watcher. The
+        # requester gets the ack; the watcher gets the fan-out.
         ws = MiniWs("127.0.0.1", port, "/v1/events")
+        watcher = MiniWs("127.0.0.1", port, "/v1/events")
+        for client in (ws, watcher):
+            client.send_text(json.dumps({"op": "subscribeScene", "sceneId": scene_id}))
+            sub = json.loads(client.recv_text(timeout=5.0))
+            expect(sub.get("event") == "scene.subscribed", f"scene.subscribed: {sub}")
+            expect(sub.get("sceneId") == scene_id, f"sub sceneId: {sub}")
         ws.send_text(json.dumps({
             "op": "scene.patch",
             "sceneId": scene_id,
@@ -354,7 +362,12 @@ def main():
         expect(ack.get("sceneId") == scene_id, f"ack sceneId: {ack}")
         expect(ack.get("sceneVersion") == 2, f"ack version: {ack}")
         expect(ack.get("applied") == 2, f"ack applied: {ack}")
-        print("ok: WS scene.patch round-trip")
+        bcast = json.loads(watcher.recv_text(timeout=5.0))
+        expect(bcast.get("event") == "scene.patched", f"fan-out event: {bcast}")
+        expect(bcast.get("sceneId") == scene_id, f"fan-out sceneId: {bcast}")
+        expect(bcast.get("sceneVersion") == 2 and bcast.get("applied") == 2,
+               f"fan-out payload: {bcast}")
+        print("ok: WS scene.patch round-trip + fan-out to second client")
 
         # Unknown op -> scene.error (and the scene stays untouched).
         ws.send_text(json.dumps({
@@ -366,6 +379,9 @@ def main():
         err = json.loads(ws.recv_text(timeout=5.0))
         expect(err.get("event") == "scene.error", f"scene.error event: {err}")
         expect("rotate" in err.get("detail", ""), f"scene.error detail: {err}")
+        berr = json.loads(watcher.recv_text(timeout=5.0))
+        expect(berr.get("event") == "scene.error" and berr.get("sceneId") == scene_id,
+               f"scene.error fan-out: {berr}")
         ws.send_text(json.dumps({
             "op": "scene.patch",
             "sceneId": "nope",
@@ -375,6 +391,7 @@ def main():
         err = json.loads(ws.recv_text(timeout=5.0))
         expect(err.get("event") == "scene.error", f"scene.error unknown scene: {err}")
         ws.close()
+        watcher.close()
         print("ok: WS scene.error paths")
 
         status, loaded = http("GET", f"{base}/v1/scenarios/{scene_id}")
@@ -399,7 +416,9 @@ def main():
         expect(st.get("state") == "succeeded", f"scene job state: {st}")
         status, run = http("GET", f"{base}/v1/runs/{scene_job}")
         expect(status == 200, f"scene run: {status} {run}")
-        expect(run.get("sceneVersion") == "2", f"run sceneVersion: {run}")
+        expect(isinstance(run.get("sceneVersion"), int)
+               and not isinstance(run.get("sceneVersion"), bool)
+               and run.get("sceneVersion") == 2, f"run sceneVersion uint64: {run}")
         expect(run.get("paramsDigest", {}).get("sceneVersion") == 2,
                f"paramsDigest sceneVersion: {run}")
         print("ok: scene-based simulation + run sceneVersion")

@@ -66,11 +66,13 @@ nlohmann::json problemJson(int status, std::string title, std::string detail,
 void EventHub::add(Connection& conn) {
   std::lock_guard lock(m_mutex);
   m_subs.emplace(&conn, std::set<std::string>{});
+  m_scene_subs.emplace(&conn, std::set<std::string>{});
 }
 
 void EventHub::remove(Connection& conn) {
   std::lock_guard lock(m_mutex);
   m_subs.erase(&conn);
+  m_scene_subs.erase(&conn);
 }
 
 void EventHub::subscribe(Connection& conn, const std::string& jobId) {
@@ -78,6 +80,14 @@ void EventHub::subscribe(Connection& conn, const std::string& jobId) {
   const auto it = m_subs.find(&conn);
   if (it != m_subs.end() && !jobId.empty()) {
     it->second.insert(jobId);
+  }
+}
+
+void EventHub::subscribeScene(Connection& conn, const std::string& sceneId) {
+  std::lock_guard lock(m_mutex);
+  const auto it = m_scene_subs.find(&conn);
+  if (it != m_scene_subs.end() && !sceneId.empty()) {
+    it->second.insert(sceneId);
   }
 }
 
@@ -91,6 +101,28 @@ void EventHub::publish(const std::string& event, const std::string& jobId,
   std::lock_guard lock(m_mutex);
   for (auto& [conn, jobs] : m_subs) {
     if (jobs.contains("*") || jobs.contains(jobId)) {
+      conn->send_text(text);
+    }
+  }
+}
+
+void EventHub::publishScene(const std::string& event, const std::string& sceneId,
+                            const nlohmann::json& fields,
+                            const Connection* exclude) {
+  if (sceneId.empty()) {
+    return;
+  }
+  nlohmann::json payload = fields;
+  payload["event"] = event;
+  payload["sceneId"] = sceneId;
+  const std::string text = payload.dump();
+
+  std::lock_guard lock(m_mutex);
+  for (auto& [conn, scenes] : m_scene_subs) {
+    if (conn == exclude) {
+      continue;
+    }
+    if (scenes.contains(sceneId)) {
       conn->send_text(text);
     }
   }

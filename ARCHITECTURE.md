@@ -174,7 +174,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - REST: `POST /v1/scenarios` (scenario JSON → `{sceneId, sceneVersion}`), `GET /v1/scenarios/{sceneId}` (→ `{sceneId, sceneVersion, scenario}`). `POST /v1/simulations` accepts `{"sceneId"}` instead of an inline scenario; the stored snapshot runs and its `sceneVersion` lands in the run record / `paramsDigest`.
 - Interactive edits use WS deltas on `/v1/events`, not full recompute:
   - client → `scene.patch` `{ "op": "scene.patch", sceneId, ops: [...] }`
-  - server → `scene.patched` `{ sceneId, sceneVersion, applied }` or `scene.error` `{ detail }` (same connection)
+  - server → `scene.patched` `{ sceneId, sceneVersion, applied }` or `scene.error` `{ detail }` (ack on the requester's connection) **and** the same outcome fanned out to connections that sent `{ "op": "subscribeScene", sceneId }` (requester excluded — no double delivery). `sceneVersion` is uint64 everywhere (run record, `paramsDigest`, wire).
 - **v1 patch ops** (all-or-nothing per message; one `sceneVersion` bump per accepted patch):
 
   | op | fields | effect |
@@ -248,14 +248,14 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 Errors: RFC7807-ish `{ "type", "title", "status", "detail", "fields"? }`.
 
 ### WebSocket `/v1/events`
-Client sends: `{ "op": "subscribe", "jobId": "..." }` or `"jobId": "*"`.
+Client sends: `{ "op": "subscribe", "jobId": "..." }` or `"jobId": "*"`; `{ "op": "subscribeScene", "sceneId": "..." }` registers for scene event fan-out (ack `scene.subscribed`).
 Server events (JSON):
 
 | event | payload |
 |---|---|
 | `scene.patch` | client→server: delta ops (v1: `move`, `setPower`) |
-| `scene.patched` | server→client: ack + `sceneVersion`, `applied` |
-| `scene.error` | server→client: patch rejected (`detail`); scene unchanged |
+| `scene.patched` | server→client: ack + `sceneVersion`, `applied`; also fanned out to `subscribeScene` watchers of that scene |
+| `scene.error` | server→client: patch rejected (`detail`); scene unchanged; also fanned out to `subscribeScene` watchers |
 | `job.progress` | `jobId`, `fraction` 0..1, `stage` |
 | `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
 | `job.failed` | `jobId`, `error` |

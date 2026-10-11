@@ -163,13 +163,30 @@ TEST(RunsStoreTest, RunJsonSummaryAndDetailShape) {
   EXPECT_FALSE(summary.contains("links"));
   EXPECT_FALSE(summary.contains("sceneVersion"));
 
-  record.sceneVersion = "scene-7";
+  record.sceneVersion = 7;
   const nlohmann::json detail = av::api::runToJson(record);
-  EXPECT_EQ(detail.at("sceneVersion"), "scene-7");
+  // uint64 on the wire (P3c): numeric, not the old string form.
+  EXPECT_TRUE(detail.at("sceneVersion").is_number_unsigned());
+  EXPECT_EQ(detail.at("sceneVersion"), 7);
   ASSERT_TRUE(detail.contains("links"));
   EXPECT_EQ(detail.at("links").at("result"), "/v1/jobs/job-1/result");
   EXPECT_EQ(detail.at("links").at("ir"), "/v1/jobs/job-1/ir.wav");
   EXPECT_EQ(detail.at("links").at("field"), "/v1/jobs/job-1/field");
+}
+
+TEST(RunsStoreTest, SceneVersionRoundTripsAsUint64) {
+  av::api::RunsStore store;
+  const auto t0 = Clock::now();
+  store.noteSubmitted("job-s", "image-source", "demo", nlohmann::json::object(),
+                      t0, std::uint64_t{42});
+  ASSERT_TRUE(store.noteTerminal("job-s", "succeeded", t0 + 1s));
+  const std::optional<av::api::RunRecord> run = store.get("job-s");
+  ASSERT_TRUE(run.has_value());
+  ASSERT_TRUE(run->sceneVersion.has_value());
+  EXPECT_EQ(*run->sceneVersion, 42u);
+  const nlohmann::json detail = av::api::runToJson(*run);
+  EXPECT_TRUE(detail.at("sceneVersion").is_number_unsigned());
+  EXPECT_EQ(detail.at("sceneVersion"), 42);
 }
 
 TEST(RunsStoreTest, Iso8601Format) {

@@ -329,12 +329,8 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
           runDigest["sceneVersion"] = *sceneVersion;
         }
         const av::JobId id = jobs.submit(std::move(scenario));
-        runs.noteSubmitted(
-            id, runEngine, runName, runDigest,
-            std::chrono::system_clock::now(),
-            sceneVersion.has_value()
-                ? std::optional<std::string>{std::to_string(*sceneVersion)}
-                : std::nullopt);
+        runs.noteSubmitted(id, runEngine, runName, runDigest,
+                           std::chrono::system_clock::now(), sceneVersion);
         if (!wantsSync(req)) {
           nlohmann::json out;
           out["jobId"] = id;
@@ -477,15 +473,35 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
           hub.subscribe(conn, msg.value("jobId", ""));
           return;
         }
+        if (op == "subscribeScene") {
+          const std::string sceneId = msg.value("sceneId", "");
+          if (sceneId.empty()) {
+            return;  // same silent drop as job subscribe with empty id
+          }
+          hub.subscribeScene(conn, sceneId);
+          // Ack so a client (or test) knows the registration landed before
+          // it starts patching on another connection.
+          conn.send_text(nlohmann::json{{"event", "scene.subscribed"},
+                                        {"sceneId", sceneId}}
+                             .dump());
+          return;
+        }
         if (op != "scene.patch") {
           // Unknown ops are ignored (same contract as malformed frames).
           return;
         }
 
         // scene.patch: {"op","sceneId","ops":[...]}. Every op must land or the
-        // whole patch is rejected (SceneStore::patch); reply on this connection.
+        // whole patch is rejected (SceneStore::patch); the requester gets an
+        // ack on this connection and subscribeScene watchers get the same
+        // outcome fanned out (P3c) minus the requester (no double delivery).
         auto reply = [&conn](const nlohmann::json& body) {
           conn.send_text(body.dump());
+        };
+        auto fanOut = [&hub, &conn](const std::string& event,
+                                    const std::string& sceneId,
+                                    const nlohmann::json& fields) {
+          hub.publishScene(event, sceneId, fields, &conn);
         };
         const std::string sceneId = msg.value("sceneId", "");
         if (sceneId.empty()) {
@@ -497,17 +513,22 @@ void registerRoutes(crow::SimpleApp& app, av::JobManager& jobs,
                 av::api::parsePatchOps(msg.value("ops", nlohmann::json()), ops);
             !error.empty()) {
           reply({{"event", "scene.error"}, {"detail", error}});
+          fanOut("scene.error", sceneId, {{"detail", error}});
           return;
         }
         const av::api::PatchResult result = scenes.patch(sceneId, ops);
         if (!result.ok) {
           reply({{"event", "scene.error"}, {"detail", result.error}});
+          fanOut("scene.error", sceneId, {{"detail", result.error}});
           return;
         }
         reply({{"event", "scene.patched"},
                {"sceneId", sceneId},
                {"sceneVersion", result.sceneVersion},
                {"applied", result.applied}});
+        fanOut("scene.patched", sceneId,
+               {{"sceneVersion", result.sceneVersion},
+                {"applied", result.applied}});
       })
       .onclose([&hub](crow::websocket::connection& conn,
                       const std::string& /*reason*/) {

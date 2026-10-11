@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -24,7 +25,8 @@ struct RunRecord {
   std::string engine;
   std::string scenarioName;
   // Set when the run was submitted from the Scene Store (`{"sceneId"}`).
-  std::optional<std::string> sceneVersion;
+  // uint64, same type as SceneSnapshot::sceneVersion and paramsDigest (P3c).
+  std::optional<std::uint64_t> sceneVersion;
   // jobStateName of the terminal state: "succeeded"|"failed"|"cancelled".
   std::string state;
   std::chrono::system_clock::time_point submittedAt{};
@@ -49,7 +51,7 @@ class RunsStore {
   void noteSubmitted(const JobId& jobId, std::string engine,
                      std::string scenarioName, nlohmann::json paramsDigest,
                      std::chrono::system_clock::time_point submittedAt,
-                     std::optional<std::string> sceneVersion = std::nullopt);
+                     std::optional<std::uint64_t> sceneVersion = std::nullopt);
 
   // Appends on first terminal note. False for unknown jobId or a duplicate.
   bool noteTerminal(const JobId& jobId, std::string state,
@@ -65,7 +67,7 @@ class RunsStore {
   struct Pending {
     std::string engine;
     std::string scenarioName;
-    std::optional<std::string> sceneVersion;
+    std::optional<std::uint64_t> sceneVersion;
     std::chrono::system_clock::time_point submittedAt{};
     nlohmann::json paramsDigest;
   };
