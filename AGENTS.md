@@ -9,7 +9,7 @@
 
 ## Стадия проекта
 
-**P0+P1+P2 delivered** (engines sabine/ISM/RT, mesh OBJ+glTF, field, runs, av-cli, av-api). Next: optional hybrid engine, source catalog, scene.patch — GUI (P3) and dynamic DLL (P2.5) only by explicit request.
+**P0–P3 backend delivered**: engines (sabine-eyring, image-source, ray-tracing, hybrid), mesh OBJ+glTF, SpatialField, runs history, source catalog, Scene Store + WS scene.patch, av-cli, av-api. **GUI (Electron) и dynamic DLL (P2.5) — только по явному запросу.** ctest baseline ≈167.
 
 Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать. Новый scope — сначала в docs, потом код.
 

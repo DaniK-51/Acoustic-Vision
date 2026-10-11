@@ -2,7 +2,7 @@
 
 Open-source инструмент акустического анализа помещений: 3D-сцена → источники → алгоритмы → поле звука, отражения, артефакты.
 
-**Стадия: P0 (core + CLI) готов, открыт P1 (API).** Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` — unit-тесты ядра.
+**Стадия: P0–P3 backend готов** (engines, mesh, field, runs, catalog, scene.patch, REST/WS). GUI — следующий этап. Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` (~167 tests).
 
 ## Видение
 
@@ -38,38 +38,54 @@ Open-source инструмент акустического анализа по�
 | Open research | Алгоритмы из работ; golden-бенчи |
 | Без measurement | Не наш pipeline |
 
-## Целевая структура репозитория
+## Быстрый старт
+
+```bash
+cmake --preset linux-debug
+cmake --build --preset linux-debug
+ctest --preset linux-debug
+
+build/linux-debug/apps/cli/av-cli engines
+build/linux-debug/apps/cli/av-cli run tests/fixtures/demo-scenario.json -o out/
+build/linux-debug/apps/cli/av-cli run tests/fixtures/box-scenario.json -o out-mesh/
+
+build/linux-debug/apps/api/av-api --port 8787
+# GET  /v1/health | /v1/engines | /v1/source-catalog | /v1/runs
+# POST /v1/simulations   (body=scenario | {"sceneId"})  ?sync=1
+# WS   /v1/events        job.* · scene.patch
+```
+
+Windows: `cmake --preset windows-msvc-x64-release` (vcpkg).
+
+## Структура репозитория
 
 ```
-docs/         # idea.md, engines.md          — есть
-schemas/      # scenario, engine-descriptor  — есть (контракты)
-ARCHITECTURE.md, README.md, AGENTS.md       — есть
-
-# --- ниже — план, появится на этапе реализации ---
-libs/core     # geometry, materials, sources, metrics, Engine API, field
-libs/io       # OBJ/glTF, scenario JSON, WAV/CSV, field
-libs/sim      # job queue, progress, cancel
-engines/      # sabine_eyring, image_source, ray_tracing, …
+libs/core     # geometry, materials, metrics, Engine API (+ ray-tracing, hybrid)
+libs/io       # OBJ/glTF, scenario JSON, WAV, field.json, source catalog
+libs/sim      # JobManager
 apps/cli      # av-cli
-apps/api      # av-api (REST + WebSocket, /v1)
-tests/        # unit, integration, fixtures/golden
-gui/          # P3: Electron + Vue + Three.js
+apps/api      # av-api REST+WS, SceneStore, RunsStore
+data/         # source_catalog.json
+schemas/      # scenario, engine-descriptor, source-catalog
+tests/        # unit + api_smoke + cli smoke + fixtures
+gui/          # placeholder (Electron later)
 ```
 
 ## Roadmap
 
-| Фаза | Поставка |
-|------|----------|
-| **P0** | Engine API + Sabine/Eyring + Image Source + metrics + CLI |
-| **P1** | av-api REST/WS, jobs, runs history |
-| **P2** | OBJ/glTF, mesh, Ray Tracing, paths, spatial field |
-| **P2.5** | Dynamic plugin SDK (C ABI) |
-| **P3** | GUI: базовый 3D-редактор, catalog, scene.patch, кнопка «Расчёт» |
-| **P4** | Research-алгоритмы, каталог источников, сравнение runs |
+| Фаза | Поставка | Статус |
+|------|----------|--------|
+| **P0** | Engine API, Sabine/Eyring, ISM, metrics, CLI | done |
+| **P1** | av-api REST/WS, JobManager, runs history | done |
+| **P2** | mesh OBJ+glTF, Ray Tracing, hybrid, field | done |
+| **P3 backend** | source catalog, Scene Store, scene.patch | done |
+| **P2.5** | Dynamic plugin SDK (C ABI) | only on request |
+| **P3 GUI** | Electron + Vue + Three.js | only on request |
+| **P4** | Research-алгоритмы | later |
 
-## Стек (план)
+## Стек
 
-C++20 · CMake ≥ 3.24 · vcpkg · Eigen · nlohmann/json · GoogleTest · Crow (P1) · tinyobjloader/tinygltf (P2) · Electron + Vue + Three.js (P3)
+C++20 · CMake ≥ 3.24 · nlohmann/json · GoogleTest · Crow+Asio · tinyobjloader · tinygltf · (GUI) Electron + Vue + Three.js
 
 ## Лицензия
 
