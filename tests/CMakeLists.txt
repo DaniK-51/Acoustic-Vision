@@ -17,11 +17,13 @@ add_executable(av_unit_tests
   unit/test_engine_registry.cpp
   unit/test_metrics.cpp
   unit/test_engines.cpp
+  unit/test_io.cpp
 )
 
 target_link_libraries(av_unit_tests
   PRIVATE
     av::core
+    av::io
     GTest::gtest_main
 )
 

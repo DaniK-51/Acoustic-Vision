@@ -36,7 +36,11 @@
           "properties": {
             "uri": { "type": "string" },
             "unit": { "enum": ["m", "mm", "cm", "in"] },
-            "scale": { "type": "number", "exclusiveMinimum": 0 }
+            "scale": { "type": "number", "exclusiveMinimum": 0 },
+            "materialOverrides": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            }
           }
         }
       }

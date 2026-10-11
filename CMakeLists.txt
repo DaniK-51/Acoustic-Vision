@@ -28,6 +28,9 @@ if(NOT nlohmann_json_FOUND)
 endif()
 
 add_subdirectory(libs/core)
+add_subdirectory(libs/io)
+
+add_subdirectory(apps/cli)
 
 if(AV_BUILD_TESTS)
   enable_testing()

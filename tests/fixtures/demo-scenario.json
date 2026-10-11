@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "name": "demo-scenario",
+  "room": {
+    "type": "rect",
+    "size": { "w": 6.0, "h": 2.8, "d": 4.5 },
+    "faces": {
+      "floor": "mat-carpet",
+      "ceiling": "mat-plaster",
+      "x+": "mat-brick",
+      "x-": "mat-brick",
+      "z+": "mat-brick",
+      "z-": "mat-brick"
+    }
+  },
+  "materials": [
+    {
+      "id": "mat-carpet",
+      "name": "Carpet on concrete",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.2, 0.3, 0.4, 0.4, 0.4],
+      "scattering": 0.1
+    },
+    {
+      "id": "mat-plaster",
+      "name": "Plasterboard",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.1, 0.15, 0.2, 0.2, 0.2],
+      "scattering": 0.1
+    },
+    {
+      "id": "mat-brick",
+      "name": "Painted brick",
+      "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+      "absorption": [0.1, 0.1, 0.12, 0.15, 0.15, 0.2],
+      "scattering": 0.1
+    }
+  ],
+  "sources": [
+    { "id": "src-1", "position": [1.2, 1.5, 1.0], "powerDb": 80.0 }
+  ],
+  "receivers": [
+    { "id": "rcv-1", "position": [4.0, 1.5, 3.0] }
+  ],
+  "params": {
+    "engine": "image-source",
+    "maxReflectionOrder": 10,
+    "sampleRate": 16000,
+    "durationSec": 1.0,
+    "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+    "speedOfSound": 343.0,
+    "capturePaths": false,
+    "airAbsorption": false,
+    "signedIr": false
+  }
+}
