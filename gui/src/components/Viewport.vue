@@ -2,12 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import type { Scenario } from '../api/types';
+import type { JobFieldSummary, Scenario } from '../api/types';
 
 // Interactive viewport: room box + source/receiver markers (rect rooms in
 // particular), click select, drag on the horizontal plane (X/Z, Y kept),
 // numeric X/Z inputs as the fallback. Moves are emitted to the shell, which
 // debounces them into WS scene.patch — the viewport never talks to the API.
+//
+// Field heat-map: SpatialField values (linear energy, x-fastest index) drawn
+// as a Points cloud. Levels shown as relative dB — 10*log10(v/max(values)),
+// so 0 dB = grid maximum (legend states this).
 
 export interface EntityRef {
   entityType: 'source' | 'receiver';
@@ -17,6 +21,8 @@ export interface EntityRef {
 const props = defineProps<{
   scenario: Scenario | null;
   selection: EntityRef | null;
+  /** Full field grid from GET /jobs/{jobId}/field (null = no heat-map). */
+  field: JobFieldSummary | null;
 }>();
 
 const emit = defineEmits<{
@@ -45,6 +51,123 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const planeHit = new THREE.Vector3();
+
+// --- field heat-map ---
+// Points cloud over the SpatialField grid. Linear energy values are shown as
+// relative dB: 10*log10(v / max(values)) — 0 dB is the grid peak, documented
+// in the legend. Cells below kFieldFloorDb are skipped so quiet space stays
+// transparent instead of a solid fog of floor-colored points.
+const showField = ref(true);
+const legend = ref<{ minDb: number; maxDb: number; cells: number } | null>(null);
+let fieldPoints: THREE.Points | null = null;
+
+const kFieldFloorDb = -30;
+
+function clearField(): void {
+  if (fieldPoints && scene) {
+    scene.remove(fieldPoints);
+    fieldPoints.geometry.dispose();
+    (fieldPoints.material as THREE.Material).dispose();
+    fieldPoints = null;
+  }
+  legend.value = null;
+}
+
+/** Blue → red ramp over t in [0,1] (low → high level). */
+function levelColor(t: number): THREE.Color {
+  return new THREE.Color().setHSL((1 - t) * 0.66, 0.85, 0.5);
+}
+
+function rebuildField(): void {
+  clearField();
+  const field = props.field;
+  if (!field || !scene) {
+    return;
+  }
+  const { nx, ny, nz, values } = field;
+  if (!values || nx <= 0 || ny <= 0 || nz <= 0) {
+    return;
+  }
+  const cell = field.cellSize && field.cellSize > 0 ? field.cellSize : 1;
+  const origin = field.origin ?? [0, 0, 0];
+  let peak = 0;
+  for (const v of values) {
+    if (Number.isFinite(v) && v > peak) {
+      peak = v;
+    }
+  }
+  if (peak <= 0) {
+    return;
+  }
+
+  const positions: number[] = [];
+  const colors: number[] = [];
+  let minDb = 0;
+  let maxDb = 0;
+  let first = true;
+  // values index: x + nx*(y + ny*z) — x fastest (SpatialField contract).
+  for (let z = 0; z < nz; z++) {
+    for (let y = 0; y < ny; y++) {
+      for (let x = 0; x < nx; x++) {
+        const v = values[x + nx * (y + ny * z)];
+        if (!Number.isFinite(v) || v <= 0) {
+          continue;
+        }
+        const db = 10 * Math.log10(v / peak);
+        if (db < kFieldFloorDb) {
+          continue;
+        }
+        positions.push(
+          origin[0] + (x + 0.5) * cell,
+          origin[1] + (y + 0.5) * cell,
+          origin[2] + (z + 0.5) * cell,
+        );
+        // Floor maps to 0 (blue), peak to 1 (red).
+        const t = Math.min(1, Math.max(0, (db - kFieldFloorDb) / (0 - kFieldFloorDb)));
+        const color = levelColor(t);
+        colors.push(color.r, color.g, color.b);
+        if (first) {
+          minDb = db;
+          maxDb = db;
+          first = false;
+        } else {
+          if (db < minDb) {
+            minDb = db;
+          }
+          if (db > maxDb) {
+            maxDb = db;
+          }
+        }
+      }
+    }
+  }
+  if (positions.length === 0) {
+    return;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    size: Math.max(cell * 0.75, 0.02),
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+    sizeAttenuation: true,
+  });
+  fieldPoints = new THREE.Points(geometry, material);
+  fieldPoints.visible = showField.value;
+  scene.add(fieldPoints);
+  legend.value = { minDb, maxDb, cells: positions.length / 3 };
+}
+
+function toggleField(): void {
+  showField.value = !showField.value;
+  if (fieldPoints) {
+    fieldPoints.visible = showField.value;
+  }
+}
 
 // Drag state (null = orbit controls own the pointer).
 let dragKey = '';
@@ -296,6 +419,7 @@ onMounted(() => {
   scene.add(roomBox);
   applyRoom();
   syncMarkers();
+  rebuildField();
 
   const canvas = renderer.domElement;
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -313,6 +437,10 @@ onMounted(() => {
   watch(
     () => selectionKey(),
     () => syncMarkers(),
+  );
+  watch(
+    () => props.field,
+    () => rebuildField(),
   );
 
   resizeObserver = new ResizeObserver(() => onResize());
@@ -332,6 +460,7 @@ onBeforeUnmount(() => {
   cancelAnimationFrame(raf);
   resizeObserver?.disconnect();
   resizeObserver = null;
+  clearField();
   controls?.dispose();
   controls = null;
   if (renderer) {
@@ -378,6 +507,21 @@ onBeforeUnmount(() => {
     <div class="overlay dim">
       Click to select · drag on the plane to move (X/Z) · orbit with empty drag
       <span v-if="scenario?.room?.type === 'rect'"> · room box from scenario</span>
+    </div>
+    <div v-if="field" class="field-box">
+      <label>
+        <input type="checkbox" :checked="showField" @change="toggleField" />
+        Field
+      </label>
+      <template v-if="showField && legend">
+        <div class="legend-bar" aria-hidden="true"></div>
+        <span class="mono legend-text">
+          {{ legend.minDb.toFixed(1) }} … {{ legend.maxDb.toFixed(1) }} dB rel
+          (0 = max)
+        </span>
+        <span class="dim">{{ legend.cells }} cells</span>
+      </template>
+      <span v-else-if="showField" class="dim">no cells above floor</span>
     </div>
     <div v-if="selection" class="sel-box">
       <span class="mono">{{ selection.entityType }} {{ selection.id }}</span>
@@ -432,6 +576,38 @@ onBeforeUnmount(() => {
   bottom: 8px;
   font-size: 11px;
   pointer-events: none;
+}
+
+.field-box {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.field-box label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.legend-bar {
+  width: 72px;
+  height: 8px;
+  border-radius: 2px;
+  background: linear-gradient(to right, #2b5cff, #2ec7b8, #e8d44d, #e23b2e);
+}
+
+.legend-text {
+  font-size: 10px;
 }
 
 .sel-box {

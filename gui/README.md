@@ -4,6 +4,8 @@ Electron + Vue 3 + Three.js + Vite + TypeScript. Связь с ядром **то
 
 **Статус slice 2:** каркас (slice 1) + запуск расчёта, форма `methodParams` из `paramsSchema`, детали прогона с метриками (RT60/EDT/early reflections), скачать `ir.wav`, наличие field. Без редактора и heat-map — это GUI3.
 
+**GUI3 (heat-map + IR):** поле `field` рисуется в viewport как point-cloud (blue→red, переключатель Field, легенда в относительных дБ — 0 = максимум сетки), график IR в RunDetail (canvas, опция dB) парсится из `ir.wav` клиентски; кнопка «Вставить источник» в каталоге добавляет источник в загруженный сценарий.
+
 ## Запуск
 
 1. Поднять API (порт по умолчанию `8787`):

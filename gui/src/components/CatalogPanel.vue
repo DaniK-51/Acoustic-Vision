@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import type { SourceCatalog } from '../api/types';
+import type { SourceCatalog, SourceCatalogEntry } from '../api/types';
 
 defineProps<{
   catalog: SourceCatalog | null;
   loading: boolean;
   error: string;
+  /** False when no scenario is loaded — insert needs a target scene. */
+  canInsert: boolean;
 }>();
 
-const emit = defineEmits<{ refresh: [] }>();
+const emit = defineEmits<{
+  refresh: [];
+  insert: [entry: SourceCatalogEntry];
+}>();
 </script>
 
 <template>
@@ -29,6 +34,7 @@ const emit = defineEmits<{ refresh: [] }>();
             <th>category</th>
             <th>power dB</th>
             <th>directivity</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -38,9 +44,19 @@ const emit = defineEmits<{ refresh: [] }>();
             <td>{{ entry.category ?? '—' }}</td>
             <td>{{ entry.powerDb.toFixed(1) }}</td>
             <td>{{ entry.directivity.type }}</td>
+            <td>
+              <button
+                class="linkish"
+                :disabled="!canInsert"
+                :title="canInsert ? 'Add source to the loaded scenario' : 'Load a scenario first'"
+                @click="emit('insert', entry)"
+              >
+                Вставить источник
+              </button>
+            </td>
           </tr>
           <tr v-if="catalog.sources.length === 0">
-            <td colspan="5" class="dim">Catalog is empty.</td>
+            <td colspan="6" class="dim">Catalog is empty.</td>
           </tr>
         </tbody>
       </table>
@@ -76,6 +92,12 @@ h2 {
 .scroll {
   overflow: auto;
   min-height: 0;
+}
+
+.linkish {
+  padding: 2px 8px;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .disclaimer {

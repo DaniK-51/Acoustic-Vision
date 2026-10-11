@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { EarlyReflection, JobResult, Rt60Entry, RunDetail } from '../api/types';
+import type { IrWave } from '../api/wav';
+import IrChart from './IrChart.vue';
 
 const props = defineProps<{
   open: boolean;
@@ -8,6 +10,9 @@ const props = defineProps<{
   result: JobResult | null;
   resultError: string;
   loading: boolean;
+  irWave: IrWave | null;
+  irWaveError: string;
+  irWaveLoading: boolean;
 }>();
 
 const emit = defineEmits<{ close: []; downloadIr: [jobId: string]; refresh: [] }>();
@@ -154,6 +159,13 @@ function whenText(iso: string): string {
             …and {{ early.length - earlyPreview.length }} more.
           </p>
 
+          <h3>IR waveform</h3>
+          <IrChart
+            :wave="irWave"
+            :error="irWaveError"
+            :loading="irWaveLoading"
+          />
+
           <h3>Artifacts</h3>
           <table class="artifacts">
             <tbody>
@@ -176,7 +188,7 @@ function whenText(iso: string): string {
                   <span v-if="field.bandHz !== undefined" class="dim">
                     · band {{ field.bandHz }} Hz
                   </span>
-                  <span class="dim"> (no heat-map yet)</span>
+                  <span class="dim">· heat-map in viewport</span>
                 </td>
                 <td v-else class="dim">absent</td>
               </tr>

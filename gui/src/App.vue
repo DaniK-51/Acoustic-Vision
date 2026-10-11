@@ -4,12 +4,15 @@ import { api, ApiError } from './api/client';
 import type {
   EngineDescriptor,
   HealthResponse,
+  JobFieldSummary,
   JobResult,
   RunDetail,
   RunSummary,
   Scenario,
   SourceCatalog,
+  SourceCatalogEntry,
 } from './api/types';
+import { parseWavFloat32, type IrWave } from './api/wav';
 import { EventsSocket, type WsStatus } from './api/ws';
 import { apiBaseUrl } from './config';
 import { formValuesFrom } from './params-schema';
@@ -63,6 +66,12 @@ const runResult = ref<JobResult | null>(null);
 const runDetailError = ref('');
 const runResultError = ref('');
 const runDetailLoading = ref(false);
+
+// --- GUI3: field heat-map + IR waveform ---
+const fieldData = ref<JobFieldSummary | null>(null);
+const irWave = ref<IrWave | null>(null);
+const irWaveError = ref('');
+const irWaveLoading = ref(false);
 
 const selectedEngine = computed<EngineDescriptor | undefined>(() =>
   engines.value.find((e) => e.id === selectedEngineId.value),
@@ -162,6 +171,8 @@ async function onScenarioSubmit(payload: Scenario | Record<string, unknown>): Pr
     sceneVersion.value = res.sceneVersion;
     scenario.value = payload as Scenario;
     selection.value = null;
+    // New scene → old heat-map no longer matches the geometry.
+    fieldData.value = null;
     patchError.value = '';
     pendingOps = [];
     if (patchTimer !== null) {
@@ -193,6 +204,8 @@ async function onRun(): Promise<void> {
   flushPatch();
   submitting.value = true;
   submitError.value = '';
+  // Heat-map belongs to a finished run; drop the previous grid now.
+  fieldData.value = null;
   try {
     // SimParams overlay on the stored snapshot: run keeps sceneVersion in
     // its digest while engine/methodParams come from the form.
@@ -311,12 +324,39 @@ async function onCancel(): Promise<void> {
 }
 
 // --- run detail ---
+/** Heat-map payload for the viewport; refreshed whenever a run is opened. */
+async function loadFieldForJob(jobId: string): Promise<void> {
+  try {
+    fieldData.value = await api.jobField(jobId);
+  } catch {
+    // 404 "field not available" is normal for engines without the artifact.
+    fieldData.value = null;
+  }
+}
+
+async function loadIrWaveForJob(jobId: string): Promise<void> {
+  irWave.value = null;
+  irWaveError.value = '';
+  irWaveLoading.value = true;
+  try {
+    irWave.value = parseWavFloat32(await api.fetchIrWavBuffer(jobId));
+  } catch (err) {
+    irWaveError.value = errText(err);
+  } finally {
+    irWaveLoading.value = false;
+  }
+}
+
 async function openRunDetail(run: RunSummary): Promise<void> {
   runDetailOpen.value = true;
   runDetailLoading.value = true;
   runDetailError.value = '';
   runResultError.value = '';
   runResult.value = null;
+  // Field/IR follow the opened run; cleared first so a stale grid never shows.
+  fieldData.value = null;
+  irWave.value = null;
+  irWaveError.value = '';
   try {
     runDetail.value = await api.getRun(run.id);
   } catch (err) {
@@ -331,6 +371,10 @@ async function openRunDetail(run: RunSummary): Promise<void> {
   } catch (err) {
     runResult.value = null;
     runResultError.value = errText(err);
+  }
+  void loadFieldForJob(run.jobId);
+  if (runResult.value?.ir) {
+    void loadIrWaveForJob(run.jobId);
   }
 }
 
@@ -348,6 +392,55 @@ async function onDownloadIr(jobId: string): Promise<void> {
   } catch (err) {
     runResultError.value = errText(err);
   }
+}
+
+// --- catalog insert ---
+/** Center of a rect room; mesh rooms fall back to a small default box. */
+function roomCenter(sc: Scenario): [number, number, number] {
+  const size = sc.room?.type === 'rect' && sc.room.size ? sc.room.size : null;
+  if (size) {
+    return [size.w / 2, size.h / 2, size.d / 2];
+  }
+  return [1, 1, 1];
+}
+
+function nextSourceId(sc: Scenario, entry: SourceCatalogEntry): string {
+  const base = `src-${entry.id}`;
+  const taken = new Set((sc.sources ?? []).map((s) => s.id));
+  if (!taken.has(base)) {
+    return base;
+  }
+  let n = 2;
+  while (taken.has(`${base}-${n}`)) {
+    n++;
+  }
+  return `${base}-${n}`;
+}
+
+/**
+ * Insert a catalog source at the room center (nudged off existing sources
+ * so markers stay clickable) and re-store the scenario — scene.patch has no
+ * add-source op, so the insert path is a fresh POST /v1/scenarios snapshot.
+ */
+function onCatalogInsert(entry: SourceCatalogEntry): void {
+  const sc = scenario.value;
+  if (!sc) {
+    return;
+  }
+  const pos = roomCenter(sc);
+  const n = (sc.sources ?? []).length;
+  // Small plan-view offset per index keeps stacked inserts distinguishable.
+  const offset = 0.25 * n;
+  const source = {
+    id: nextSourceId(sc, entry),
+    position: [pos[0] + offset, pos[1], pos[2] + offset] as [number, number, number],
+    powerDb: entry.powerDb,
+  };
+  const next: Scenario = {
+    ...sc,
+    sources: [...(sc.sources ?? []), source],
+  };
+  void onScenarioSubmit(next);
 }
 
 // --- WS job fan-out → status bar ---
@@ -461,6 +554,7 @@ onBeforeUnmount(() => {
         <Viewport
           :scenario="scenario"
           :selection="selection"
+          :field="fieldData"
           @select="onSelect"
           @move="onEntityMove"
         />
@@ -494,7 +588,9 @@ onBeforeUnmount(() => {
           :catalog="catalog"
           :loading="catalogLoading"
           :error="catalogError"
+          :can-insert="Boolean(scenario)"
           @refresh="loadCatalog"
+          @insert="onCatalogInsert"
         />
         <RunsPanel
           :runs="runs"
@@ -513,6 +609,9 @@ onBeforeUnmount(() => {
       :result="runResult"
       :result-error="runResultError || runDetailError"
       :loading="runDetailLoading"
+      :ir-wave="irWave"
+      :ir-wave-error="irWaveError"
+      :ir-wave-loading="irWaveLoading"
       @close="runDetailOpen = false"
       @refresh="refreshRunDetail"
       @download-ir="onDownloadIr"

@@ -132,8 +132,25 @@ export const api = {
   jobResult: (jobId: string) =>
     request<JobResult>('GET', `/jobs/${encodeURIComponent(jobId)}/result`),
 
+  /** Full SpatialField grid (values linear energy, index x + nx*(y + ny*z)). */
+  jobField: (jobId: string) =>
+    request<import('./types').JobFieldSummary>(
+      'GET',
+      `/jobs/${encodeURIComponent(jobId)}/field`,
+    ),
+
   irWavUrl: (jobId: string) =>
     `${apiBaseUrl.replace(/\/+$/, '')}/jobs/${encodeURIComponent(jobId)}/ir.wav`,
+
+  /** Fetch ir.wav bytes for the client-side float32 WAV parser (see wav.ts). */
+  fetchIrWavBuffer: async (jobId: string): Promise<ArrayBuffer> => {
+    const res = await fetch(api.irWavUrl(jobId));
+    if (!res.ok) {
+      const parsed = await parseBody(res);
+      throw toApiError(res.status, parsed);
+    }
+    return res.arrayBuffer();
+  },
 
   /** Fetch ir.wav and hand it to the browser download path (sandbox-safe). */
   downloadIrWav: async (jobId: string, filename: string): Promise<void> => {
