@@ -4,8 +4,8 @@ Open-source room acoustics analysis: 3D scene + sources → geometric acoustics 
 
 **Vision** (voted): 3D scene + sources (custom + catalog «as-is») → multi-algorithm compute runs (may take hours on GPU) with history; interactive editing via WS scene patches (static scene lives on backend). Basic editor first, full DCC later. Artifacts = whatever the engine computes (point / field / rays / IR). No measurement/mic pipeline.
 
-**Stage**: architecture only — no implementation yet.  
-**Target OS**: Windows (MSVC). **v1 language**: C++20. **Delivery**: core first, GUI later.
+**Stage**: P0–P3 **backend delivered** (engines, mesh, field, runs, catalog, scene.patch, av-cli, av-api). GUI / dynamic DLL only by explicit request.  
+**Target OS**: Windows (MSVC). **Language**: C++20. **Delivery**: core first, GUI later.
 
 Companion docs: [`docs/idea.md`](docs/idea.md) · [`docs/engines.md`](docs/engines.md) · [`AGENTS.md`](AGENTS.md)
 
@@ -358,7 +358,7 @@ ctest --preset windows-msvc-x64-release
 |---|---|---|
 | **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV/CSV export, `av-cli` | unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
 | **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store, schema validation | integration tests green; Electron-ready contract frozen (`schemas/`) |
-| **P2** Import + mesh rooms | OBJ/glTF import, MeshRoom validation, BVH, `RayTracingEngine` (early order / hybrid IMS-direct+RT), paths export | glTF room runs; ray-IR metrics sane vs shoebox benchmark |
+| **P2** Import + mesh rooms | OBJ/glTF, Mesh, BVH, `ray-tracing`, `hybrid` (one RT pass early/late), paths, field | glTF room runs; metrics sane vs shoebox |
 | **P3** Electron+Vue+Three.js GUI | Базовый 3D-редактор, gizmos, каталог, `scene.patch`, кнопка «Расчёт», history | drag → WS-дельта; run → job |
 | **P4** Research + catalog | External algorithms as engines, richer source cards | research engine без правок GUI |
 

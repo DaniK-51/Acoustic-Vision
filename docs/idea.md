@@ -1,6 +1,6 @@
 # Acoustic-Vision — идея продукта
 
-**Стадия:** архитектура (без реализации). Контракты Engine API — в [`engines.md`](engines.md); модули и API — в [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+**Стадия:** P0–P3 backend реализован (engines, mesh, field, runs, catalog, scene.patch). GUI — следующий этап. Контракты — [`engines.md`](engines.md); модули и API — [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ## 1. Видение (согласовано)
 
