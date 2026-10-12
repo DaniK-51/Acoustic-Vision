@@ -29,3 +29,10 @@ gui/dist/
 
 # Agent / tooling
 .mimocode/
+
+# aborted re-scaffold leftovers (unused)
+gui/src/components/HeaderBar.vue
+gui/src/components/ScenarioLoader.vue
+gui/src/components/SceneOutline.vue
+gui/src/components/ViewportStub.vue
+gui/src/store.ts
