@@ -2,12 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import type { JobFieldSummary, JobRays, Scenario } from '../api/types';
 
 // Interactive viewport: room box + source/receiver markers (rect rooms in
-// particular), click select, drag on the horizontal plane (X/Z, Y kept),
-// numeric X/Z inputs as the fallback. Moves are emitted to the shell, which
-// debounces them into WS scene.patch — the viewport never talks to the API.
+// particular), click select, drag on the camera screen plane (depth toward /
+// away from the camera is preserved), TransformControls gizmo for axis-aligned
+// X/Y/Z moves, numeric X/Y/Z inputs as the fallback. Moves are emitted to the
+// shell, which debounces them into WS scene.patch — the viewport never talks
+// to the API.
 //
 // Field heat-map: SpatialField values (linear energy, x-fastest index) drawn
 // as a Points cloud. Levels shown as relative dB — 10*log10(v/max(values)),
@@ -57,6 +60,7 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const planeHit = new THREE.Vector3();
+const cameraDir = new THREE.Vector3();
 
 // --- field heat-map ---
 // Points cloud over the SpatialField grid. Linear energy values are shown as
@@ -262,9 +266,28 @@ function toggleRays(): void {
 
 // Drag state (null = orbit controls own the pointer).
 let dragKey = '';
-let dragY = 0;
+let gizmoKey = '';
+// True while the active pointer gesture belongs to the gizmo (so pointerup
+// must not treat it as an empty-space click and clear the selection).
+let gizmoPointer = false;
 let pointerDownAt = { x: 0, y: 0 };
 let pointerMoved = false;
+
+// R1: optional grid snap for marker drag and gizmo translation.
+const snapEnabled = ref(false);
+const kSnapStep = 0.25;
+let transformControls: TransformControls | null = null;
+
+function snapCoord(value: number): number {
+  return Math.round(value / kSnapStep) * kSnapStep;
+}
+
+function applySnapSetting(): void {
+  if (!transformControls) {
+    return;
+  }
+  transformControls.setTranslationSnap(snapEnabled.value ? kSnapStep : null);
+}
 
 function keyOf(ref: EntityRef): string {
   return `${ref.entityType}:${ref.id}`;
@@ -272,6 +295,17 @@ function keyOf(ref: EntityRef): string {
 
 function selectionKey(): string {
   return props.selection ? keyOf(props.selection) : '';
+}
+
+function parseKey(key: string): EntityRef | null {
+  const sep = key.indexOf(':');
+  if (sep <= 0) {
+    return null;
+  }
+  return {
+    entityType: key.slice(0, sep) as EntityRef['entityType'],
+    id: key.slice(sep + 1),
+  };
 }
 
 function setPointer(event: PointerEvent): void {
@@ -336,8 +370,9 @@ function syncMarkers(): void {
       markers.set(key, mesh);
       scene.add(mesh);
     }
-    // While dragging, the mesh follows the pointer; props lag one debounce.
-    if (key !== dragKey) {
+    // While dragging (plane or gizmo), the mesh follows the pointer;
+    // props lag one debounce.
+    if (key !== dragKey && key !== gizmoKey) {
       mesh.position.set(entry.pos[0], entry.pos[1], entry.pos[2]);
     }
     mesh.material = key === sel ? matSelected : (entry.src ? matSrc : matRcv);
@@ -357,18 +392,19 @@ function selectedPos(): [number, number, number] | null {
 }
 
 const posX = computed(() => selectedPos()?.[0] ?? 0);
+const posY = computed(() => selectedPos()?.[1] ?? 0);
 const posZ = computed(() => selectedPos()?.[2] ?? 0);
 
-function emitMove(x: number, z: number): void {
+function emitMove(x: number, y: number, z: number): void {
   const sel = props.selection;
   const pos = selectedPos();
   if (!sel || !pos) {
     return;
   }
-  emit('move', sel, [x, pos[1], z]);
+  emit('move', sel, [x, y, z]);
 }
 
-function onNumInput(axis: 0 | 2, event: Event): void {
+function onNumInput(axis: 0 | 1 | 2, event: Event): void {
   const raw = (event.target as HTMLInputElement).value;
   const value = Number(raw);
   if (!Number.isFinite(value)) {
@@ -380,13 +416,69 @@ function onNumInput(axis: 0 | 2, event: Event): void {
   }
   const next: [number, number, number] = [pos[0], pos[1], pos[2]];
   next[axis] = value;
-  emitMove(next[0], next[2]);
+  emitMove(next[0], next[1], next[2]);
+}
+
+/** Keep the gizmo attached to the selected marker (or detach on clear). */
+function syncGizmo(): void {
+  if (!transformControls) {
+    return;
+  }
+  const key = selectionKey();
+  const mesh = key ? markers.get(key) : null;
+  if (mesh) {
+    transformControls.attach(mesh);
+  } else {
+    transformControls.detach();
+    // detach() leaves a stale hover axis; clear it so marker clicks work.
+    transformControls.axis = null;
+    gizmoKey = '';
+  }
+}
+
+function onGizmoDraggingChanged(event: { value?: unknown }): void {
+  const dragging = Boolean(event.value);
+  if (controls) {
+    controls.enabled = !dragging;
+  }
+  if (dragging) {
+    const obj = transformControls?.object as THREE.Mesh | undefined;
+    gizmoKey = obj ? String(obj.userData.avKey ?? '') : '';
+  } else {
+    gizmoKey = '';
+  }
+}
+
+function onGizmoObjectChange(): void {
+  if (!transformControls?.dragging) {
+    return;
+  }
+  const obj = transformControls.object as THREE.Mesh | undefined;
+  if (!obj) {
+    return;
+  }
+  const ref = parseKey(String(obj.userData.avKey ?? ''));
+  if (!ref) {
+    return;
+  }
+  emit('move', ref, [obj.position.x, obj.position.y, obj.position.z]);
 }
 
 function onPointerDown(event: PointerEvent): void {
   if (event.button !== 0) {
     return;
   }
+  // Gizmo arrows own the pointer when hovered or already dragging.
+  // `axis` is only meaningful while an object is attached (stale otherwise).
+  if (transformControls && transformControls.dragging) {
+    gizmoPointer = true;
+    return;
+  }
+  if (transformControls?.object && transformControls.axis) {
+    gizmoPointer = true;
+    return;
+  }
+  gizmoPointer = false;
   setPointer(event);
   pointerDownAt = { x: event.clientX, y: event.clientY };
   pointerMoved = false;
@@ -395,19 +487,23 @@ function onPointerDown(event: PointerEvent): void {
     return;
   }
   const key = String(mesh.userData.avKey ?? '');
-  const sep = key.indexOf(':');
-  if (sep <= 0) {
+  const ref = parseKey(key);
+  if (!ref) {
     return;
   }
-  const ref: EntityRef = {
-    entityType: key.slice(0, sep) as EntityRef['entityType'],
-    id: key.slice(sep + 1),
-  };
   emit('select', ref);
   dragKey = key;
-  dragY = mesh.position.y;
+  // Camera-facing plane through the marker: screen-plane drag, depth
+  // toward / away from the camera stays fixed for the whole gesture.
+  if (camera) {
+    camera.getWorldDirection(cameraDir);
+    dragPlane.setFromNormalAndCoplanarPoint(cameraDir, mesh.position);
+  }
   if (controls) {
     controls.enabled = false;
+  }
+  if (transformControls) {
+    transformControls.enabled = false;
   }
   renderer?.domElement.setPointerCapture(event.pointerId);
 }
@@ -424,31 +520,42 @@ function onPointerMove(event: PointerEvent): void {
   }
   setPointer(event);
   raycaster.setFromCamera(pointer, camera);
-  dragPlane.constant = -dragY;
   if (!raycaster.ray.intersectPlane(dragPlane, planeHit)) {
     return;
   }
+  let x = planeHit.x;
+  let y = planeHit.y;
+  let z = planeHit.z;
+  if (snapEnabled.value) {
+    x = snapCoord(x);
+    y = snapCoord(y);
+    z = snapCoord(z);
+  }
   const mesh = markers.get(dragKey);
   if (mesh) {
-    mesh.position.set(planeHit.x, dragY, planeHit.z);
+    mesh.position.set(x, y, z);
   }
-  const sep = dragKey.indexOf(':');
-  emit(
-    'move',
-    {
-      entityType: dragKey.slice(0, sep) as EntityRef['entityType'],
-      id: dragKey.slice(sep + 1),
-    },
-    [planeHit.x, dragY, planeHit.z],
-  );
+  const ref = parseKey(dragKey);
+  if (ref) {
+    emit('move', ref, [x, y, z]);
+  }
 }
 
 function onPointerUp(event: PointerEvent): void {
+  if (gizmoPointer) {
+    // Gizmo gesture: leave selection alone (a click on a handle is not a
+    // click on empty space).
+    gizmoPointer = false;
+    return;
+  }
   if (dragKey) {
     renderer?.domElement.releasePointerCapture(event.pointerId);
     dragKey = '';
     if (controls) {
       controls.enabled = true;
+    }
+    if (transformControls) {
+      transformControls.enabled = true;
     }
     return;
   }
@@ -495,6 +602,15 @@ onMounted(() => {
   controls.enableDamping = true;
   controls.update();
 
+  // Axis gizmo (R1/C2): translate-only; hands orbit back on drag end.
+  transformControls = new TransformControls(camera, renderer.domElement);
+  transformControls.setMode('translate');
+  transformControls.addEventListener('dragging-changed', onGizmoDraggingChanged);
+  transformControls.addEventListener('objectChange', onGizmoObjectChange);
+  scene.add(transformControls.getHelper());
+  applySnapSetting();
+  syncGizmo();
+
   const grid = new THREE.GridHelper(24, 24, 0x3a4558, 0x252c38);
   grid.position.y = 0;
   scene.add(grid);
@@ -523,13 +639,19 @@ onMounted(() => {
     () => {
       applyRoom();
       syncMarkers();
+      // Markers may have been recreated (or removed) — re-attach or detach.
+      syncGizmo();
     },
     { deep: true },
   );
   watch(
     () => selectionKey(),
-    () => syncMarkers(),
+    () => {
+      syncMarkers();
+      syncGizmo();
+    },
   );
+  watch(snapEnabled, () => applySnapSetting());
   watch(
     () => props.field,
     () => rebuildField(),
@@ -558,6 +680,14 @@ onBeforeUnmount(() => {
   resizeObserver = null;
   clearField();
   clearRays();
+  if (transformControls) {
+    transformControls.detach();
+    if (scene) {
+      scene.remove(transformControls.getHelper());
+    }
+    transformControls.dispose();
+    transformControls = null;
+  }
   controls?.dispose();
   controls = null;
   if (renderer) {
@@ -602,8 +732,15 @@ onBeforeUnmount(() => {
   <div class="viewport">
     <div ref="container" class="canvas-host"></div>
     <div class="overlay dim">
-      Click to select · drag on the plane to move (X/Z) · orbit with empty drag
+      Click to select · drag on the screen plane (no depth change) · gizmo
+      arrows move X/Y/Z · orbit with empty drag
       <span v-if="scenario?.room?.type === 'rect'"> · room box from scenario</span>
+    </div>
+    <div class="tools-box">
+      <label>
+        <input v-model="snapEnabled" type="checkbox" />
+        Snap {{ kSnapStep }} m
+      </label>
     </div>
     <div v-if="field" class="field-box">
       <label>
@@ -640,6 +777,15 @@ onBeforeUnmount(() => {
           type="number"
           step="0.1"
           @change="onNumInput(0, $event)"
+        />
+      </label>
+      <label>
+        Y
+        <input
+          :value="posY"
+          type="number"
+          step="0.1"
+          @change="onNumInput(1, $event)"
         />
       </label>
       <label>
@@ -739,9 +885,30 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.sel-box {
+.tools-box {
   position: absolute;
   top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.tools-box label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sel-box {
+  position: absolute;
+  top: 48px;
   right: 8px;
   display: flex;
   align-items: center;
