@@ -1,18 +1,24 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import type { SourceCatalog, SourceCatalogEntry } from '../api/types';
 
 defineProps<{
   catalog: SourceCatalog | null;
   loading: boolean;
   error: string;
-  /** False when no scenario is loaded — insert needs a target scene. */
+  /** False outside the Scene stage or when no scenario is loaded (D3). */
   canInsert: boolean;
+  /** Why insert is unavailable — shown in the button tooltip. */
+  insertHint: string;
 }>();
 
 const emit = defineEmits<{
   refresh: [];
   insert: [entry: SourceCatalogEntry];
 }>();
+
+// D4: simple about card — name, category, powerDb, directivity, disclaimer.
+const aboutEntry = ref<SourceCatalogEntry | null>(null);
 </script>
 
 <template>
@@ -44,11 +50,14 @@ const emit = defineEmits<{
             <td>{{ entry.category ?? '—' }}</td>
             <td>{{ entry.powerDb.toFixed(1) }}</td>
             <td>{{ entry.directivity.type }}</td>
-            <td>
+            <td class="actions">
+              <button class="linkish" title="Карточка источника" @click="aboutEntry = entry">
+                О источнике
+              </button>
               <button
                 class="linkish"
                 :disabled="!canInsert"
-                :title="canInsert ? 'Add source to the loaded scenario' : 'Load a scenario first'"
+                :title="canInsert ? 'Add source to the loaded scenario' : insertHint"
                 @click="emit('insert', entry)"
               >
                 Вставить источник
@@ -61,6 +70,37 @@ const emit = defineEmits<{
         </tbody>
       </table>
       <p class="dim disclaimer">{{ catalog.disclaimer }}</p>
+    </div>
+
+    <!-- D4: about card (deliberately not a PDF datasheet) -->
+    <div v-if="aboutEntry" class="overlay" @click.self="aboutEntry = null">
+      <section class="card" role="dialog" aria-label="О источнике">
+        <header class="card-head">
+          <h2>О источнике</h2>
+          <button class="ghost" @click="aboutEntry = null">Закрыть</button>
+        </header>
+        <table>
+          <tbody>
+            <tr>
+              <th>name</th>
+              <td>{{ aboutEntry.name }}</td>
+            </tr>
+            <tr>
+              <th>category</th>
+              <td>{{ aboutEntry.category ?? '—' }}</td>
+            </tr>
+            <tr>
+              <th>power</th>
+              <td>{{ aboutEntry.powerDb.toFixed(1) }} dB</td>
+            </tr>
+            <tr>
+              <th>directivity</th>
+              <td>{{ aboutEntry.directivity.type }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="dim disclaimer">{{ aboutEntry.disclaimer }}</p>
+      </section>
     </div>
   </section>
 </template>
@@ -94,6 +134,11 @@ h2 {
   min-height: 0;
 }
 
+.actions {
+  display: flex;
+  gap: 4px;
+}
+
 .linkish {
   padding: 2px 8px;
   font-size: 11px;
@@ -104,5 +149,39 @@ h2 {
   margin: 8px 0 0;
   font-size: 11px;
   white-space: normal;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  padding: 24px;
+}
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: min(420px, 100%);
+  padding: 14px 16px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.card th {
+  width: 90px;
+}
+
+.ghost {
+  background: transparent;
 }
 </style>

@@ -17,7 +17,7 @@ import { parseWavFloat32, type IrWave } from './api/wav';
 import { EventsSocket, type WsStatus } from './api/ws';
 import { apiBaseUrl } from './config';
 import { formValuesFrom } from './params-schema';
-import type { ActiveJob } from './ui-types';
+import type { ActiveJob, WorkflowStage } from './ui-types';
 import CatalogPanel from './components/CatalogPanel.vue';
 import EnginePanel from './components/EnginePanel.vue';
 import EngineParamsForm from './components/EngineParamsForm.vue';
@@ -27,6 +27,7 @@ import RunControls from './components/RunControls.vue';
 import RunDetailPanel from './components/RunDetail.vue';
 import RunsPanel from './components/RunsPanel.vue';
 import SceneOutlinePanel from './components/SceneOutlinePanel.vue';
+import StageBar from './components/StageBar.vue';
 import StatusBar from './components/StatusBar.vue';
 import Viewport, { type EntityRef } from './components/Viewport.vue';
 
@@ -55,6 +56,9 @@ const healthError = ref('');
 const wsStatus = ref<WsStatus>('connecting');
 
 const activeJob = ref<ActiveJob | null>(null);
+
+// --- D2: workflow stage (Scene → Objects/Sources → Engines → Run → Results) ---
+const stage = ref<WorkflowStage>('scene');
 
 // --- GUI2: compute + run detail ---
 const methodParams = ref<Record<string, unknown>>({});
@@ -202,6 +206,27 @@ const jobRunning = computed(() => {
   return state === 'queued' || state === 'running';
 });
 
+/** D1: catalog lives in the scene zone and only on the Scene stage. */
+const showCatalog = computed(() => stage.value === 'scene');
+
+/** D3: insert allowed only at the Scene stage, with a loaded scenario. */
+const canCatalogInsert = computed(
+  () => stage.value === 'scene' && Boolean(scenario.value) && !jobRunning.value,
+);
+
+const catalogInsertHint = computed(() => {
+  if (stage.value !== 'scene') {
+    return 'Вставка источников — только на этапе Scene';
+  }
+  if (!scenario.value) {
+    return 'Load a scenario first';
+  }
+  if (jobRunning.value) {
+    return 'Unavailable while a job is running';
+  }
+  return '';
+});
+
 async function onRun(): Promise<void> {
   if (!sceneId.value || !scenario.value || submitting.value) {
     return;
@@ -227,6 +252,8 @@ async function onRun(): Promise<void> {
       fraction: 0,
       stage: 'queued',
     };
+    // D2: flow follows the pipeline — a submit belongs to the Run stage.
+    stage.value = 'run';
   } catch (err) {
     submitError.value = errText(err);
   } finally {
@@ -365,6 +392,7 @@ async function loadIrWaveForJob(jobId: string): Promise<void> {
 }
 
 async function openRunDetail(run: RunSummary): Promise<void> {
+  stage.value = 'results';
   runDetailOpen.value = true;
   runDetailLoading.value = true;
   runDetailError.value = '';
@@ -468,6 +496,10 @@ let healthTimer: ReturnType<typeof setInterval> | null = null;
 
 async function onJobTerminal(jobId: string, state: ActiveJob['state']): Promise<void> {
   await refreshRuns();
+  // D2: finished work lands on Results (opens detail below when it is ours).
+  if (stage.value === 'run') {
+    stage.value = 'results';
+  }
   // Open the finished run automatically when it is the one we submitted.
   if (jobId && jobId === currentJobId.value && state === 'succeeded') {
     const match = runs.value.find((run) => run.jobId === jobId);
@@ -553,25 +585,49 @@ onBeforeUnmount(() => {
       <span class="dim mono">{{ apiBaseUrl }}</span>
     </header>
 
+    <StageBar :stage="stage" @update:stage="stage = $event" />
+
     <div class="workspace">
       <aside class="col left">
-        <LoadScenarioPanel
-          :loading="loadLoading"
-          :error="loadError"
-          :scene-id="sceneId"
-          :scene-version="sceneVersion"
-          @submit="onScenarioSubmit"
-        />
-        <SceneOutlinePanel
-          :scenario="scenario"
-          :scene-id="sceneId"
-          :scene-version="sceneVersion"
-        />
-        <MaterialsPanel
-          :scenario="scenario"
-          :selected-face="selectedFace"
-          @select-face="onSelectFace"
-        />
+        <section class="stage-section" :data-active="stage === 'scene'">
+          <header class="stage-label">
+            <span class="stage-no">1</span> Scene
+          </header>
+          <LoadScenarioPanel
+            :loading="loadLoading"
+            :error="loadError"
+            :scene-id="sceneId"
+            :scene-version="sceneVersion"
+            @submit="onScenarioSubmit"
+          />
+          <!-- D1: catalog is scene-stage only, never in the compute zone -->
+          <CatalogPanel
+            v-if="showCatalog"
+            :catalog="catalog"
+            :loading="catalogLoading"
+            :error="catalogError"
+            :can-insert="canCatalogInsert"
+            :insert-hint="catalogInsertHint"
+            @refresh="loadCatalog"
+            @insert="onCatalogInsert"
+          />
+        </section>
+
+        <section class="stage-section" :data-active="stage === 'objects'">
+          <header class="stage-label">
+            <span class="stage-no">2</span> Objects / Sources
+          </header>
+          <SceneOutlinePanel
+            :scenario="scenario"
+            :scene-id="sceneId"
+            :scene-version="sceneVersion"
+          />
+          <MaterialsPanel
+            :scenario="scenario"
+            :selected-face="selectedFace"
+            @select-face="onSelectFace"
+          />
+        </section>
       </aside>
 
       <main class="col center">
@@ -587,44 +643,53 @@ onBeforeUnmount(() => {
       </main>
 
       <aside class="col right">
-        <EnginePanel
-          v-model="selectedEngineId"
-          :engines="engines"
-          :loading="enginesLoading"
-          :error="enginesError"
-          @refresh="loadEngines"
-        />
-        <EngineParamsForm
-          :schema="selectedEngine?.paramsSchema"
-          :initial="storedMethodParams()"
-          :disabled="submitting || jobRunning"
-          v-model="methodParams"
-        />
-        <RunControls
-          :has-scene="Boolean(sceneId && scenario)"
-          :running="submitting || jobRunning"
-          :can-cancel="jobRunning"
-          :engine-id="selectedEngineId"
-          :error="submitError"
-          @run="onRun"
-          @cancel="onCancel"
-        />
-        <CatalogPanel
-          :catalog="catalog"
-          :loading="catalogLoading"
-          :error="catalogError"
-          :can-insert="Boolean(scenario)"
-          @refresh="loadCatalog"
-          @insert="onCatalogInsert"
-        />
-        <RunsPanel
-          :runs="runs"
-          :loading="runsLoading"
-          :error="runsError"
-          :selected-run-id="runDetail?.id ?? ''"
-          @refresh="refreshRuns"
-          @select="openRunDetail"
-        />
+        <section class="stage-section" :data-active="stage === 'engines'">
+          <header class="stage-label">
+            <span class="stage-no">3</span> Engines
+          </header>
+          <EnginePanel
+            v-model="selectedEngineId"
+            :engines="engines"
+            :loading="enginesLoading"
+            :error="enginesError"
+            @refresh="loadEngines"
+          />
+          <EngineParamsForm
+            :schema="selectedEngine?.paramsSchema"
+            :initial="storedMethodParams()"
+            :disabled="submitting || jobRunning"
+            v-model="methodParams"
+          />
+        </section>
+
+        <section class="stage-section" :data-active="stage === 'run'">
+          <header class="stage-label">
+            <span class="stage-no">4</span> Run
+          </header>
+          <RunControls
+            :has-scene="Boolean(sceneId && scenario)"
+            :running="submitting || jobRunning"
+            :can-cancel="jobRunning"
+            :engine-id="selectedEngineId"
+            :error="submitError"
+            @run="onRun"
+            @cancel="onCancel"
+          />
+        </section>
+
+        <section class="stage-section" :data-active="stage === 'results'">
+          <header class="stage-label">
+            <span class="stage-no">5</span> Results
+          </header>
+          <RunsPanel
+            :runs="runs"
+            :loading="runsLoading"
+            :error="runsError"
+            :selected-run-id="runDetail?.id ?? ''"
+            @refresh="refreshRuns"
+            @select="openRunDetail"
+          />
+        </section>
       </aside>
     </div>
 
@@ -688,6 +753,41 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   overflow: auto;
+}
+
+.stage-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 8px;
+  border-left: 2px solid transparent;
+}
+
+.stage-section[data-active='true'] {
+  border-left-color: var(--accent);
+}
+
+.stage-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.stage-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(79, 140, 255, 0.18);
+  color: var(--accent);
+  font-size: 10px;
 }
 
 .center {

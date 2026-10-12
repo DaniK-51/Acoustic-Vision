@@ -6,3 +6,17 @@ export interface ActiveJob {
   stage: string;
   error?: string;
 }
+
+/** D2: workflow stages, left→right. Catalog insert lives only on 'scene'. */
+export type WorkflowStage = 'scene' | 'objects' | 'engines' | 'run' | 'results';
+
+export const WORKFLOW_STAGES: ReadonlyArray<{
+  id: WorkflowStage;
+  label: string;
+}> = [
+  { id: 'scene', label: 'Scene' },
+  { id: 'objects', label: 'Objects / Sources' },
+  { id: 'engines', label: 'Engines' },
+  { id: 'run', label: 'Run' },
+  { id: 'results', label: 'Results' },
+];
