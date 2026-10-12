@@ -25,6 +25,7 @@ add_library(av_io
   src/wav.cpp
   src/metrics_json.cpp
   src/obj_import.cpp
+  src/obj_export.cpp
   src/gltf_import.cpp
   src/mesh_import.cpp
 )

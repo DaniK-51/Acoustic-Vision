@@ -24,6 +24,12 @@ namespace av {
 [[nodiscard]] Scenario loadScenario(const std::filesystem::path& path);
 void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
 
+// Wavefront OBJ export (gen-mesh). Writes v / g / usemtl / f lines, one
+// `g`+`usemtl` pair per materialSlots entry (floor, ceiling, walls for
+// generateBoxMesh shapes). Units meters; triangle winding is preserved as-is
+// (box.obj convention). Throws std::runtime_error on IO failure.
+void saveObj(const std::filesystem::path& path, const Mesh& mesh);
+
 // Wavefront OBJ import. `unit` is "m"|"mm"|"cm"|"in"; vertex positions are
 // converted to meters at import (SI convention, AGENTS.md decision 14) and
 // multiplied by `scale`. Polygons are triangulated. Throws

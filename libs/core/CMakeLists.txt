@@ -3,6 +3,7 @@ add_library(av_core
   src/scenario/scenario.cpp
   src/metrics/metrics.cpp
   src/geometry/mesh.cpp
+  src/geometry/mesh_builder.cpp
   src/geometry/bvh.cpp
   src/acoustics/engine.cpp
   src/acoustics/builtin_engines.cpp
