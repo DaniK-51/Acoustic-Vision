@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import { scenarioPresets, type ScenarioPreset } from '../presets';
 
 const props = defineProps<{
   loading: boolean;
@@ -121,6 +122,13 @@ function useDemo(): void {
   parseError.value = '';
 }
 
+// A4: preset rooms with distinct α profiles — fill the textarea and post.
+function usePreset(preset: ScenarioPreset): void {
+  text.value = JSON.stringify(preset.scenario, null, 2);
+  parseError.value = '';
+  emit('submit', preset.scenario);
+}
+
 // Mesh demo fixture lives in gui/public/demo/ (copied into dist/ by Vite).
 // Relative fetch works both on the vite dev server and from the Electron
 // production file:// page (document base = dist/index.html).
@@ -161,6 +169,20 @@ async function useMeshDemo(): Promise<void> {
         </button>
       </span>
     </header>
+
+    <div class="presets">
+      <span class="dim">Presets (α):</span>
+      <button
+        v-for="preset in scenarioPresets"
+        :key="preset.id"
+        class="ghost"
+        :title="preset.blurb"
+        :disabled="loading"
+        @click="usePreset(preset)"
+      >
+        Load {{ preset.label }}
+      </button>
+    </div>
 
     <textarea
       v-model="text"
@@ -221,6 +243,15 @@ h2 {
 
 .ghost {
   background: transparent;
+}
+
+.presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11px;
 }
 
 textarea {

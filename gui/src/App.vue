@@ -22,6 +22,7 @@ import CatalogPanel from './components/CatalogPanel.vue';
 import EnginePanel from './components/EnginePanel.vue';
 import EngineParamsForm from './components/EngineParamsForm.vue';
 import LoadScenarioPanel from './components/LoadScenarioPanel.vue';
+import MaterialsPanel from './components/MaterialsPanel.vue';
 import RunControls from './components/RunControls.vue';
 import RunDetailPanel from './components/RunDetail.vue';
 import RunsPanel from './components/RunsPanel.vue';
@@ -241,7 +242,7 @@ let pendingOps: Array<Record<string, unknown>> = [];
 
 function applyMove(ref: EntityRef, position: [number, number, number]): void {
   const sc = scenario.value;
-  if (!sc) {
+  if (!sc || ref.entityType === 'face') {
     return;
   }
   const list = ref.entityType === 'source' ? sc.sources : sc.receivers;
@@ -307,6 +308,16 @@ function onEntityMove(ref: EntityRef, position: [number, number, number]): void 
 
 function onSelect(ref: EntityRef | null): void {
   selection.value = ref;
+}
+
+/** Face id of the current selection (A2/A3 share one selection channel). */
+const selectedFace = computed(() =>
+  selection.value?.entityType === 'face' ? selection.value.id : null,
+);
+
+/** MaterialsPanel row click → same face selection as a viewport click. */
+function onSelectFace(face: string | null): void {
+  selection.value = face ? { entityType: 'face', id: face } : null;
 }
 
 async function onCancel(): Promise<void> {
@@ -555,6 +566,11 @@ onBeforeUnmount(() => {
           :scenario="scenario"
           :scene-id="sceneId"
           :scene-version="sceneVersion"
+        />
+        <MaterialsPanel
+          :scenario="scenario"
+          :selected-face="selectedFace"
+          @select-face="onSelectFace"
         />
       </aside>
 

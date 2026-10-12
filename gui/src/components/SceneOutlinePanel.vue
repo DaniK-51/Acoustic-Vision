@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import type { Scenario } from '../api/types';
+import { materialColor, surfaceBindings } from '../materials';
 
 const props = defineProps<{
   scenario: Scenario | null;
@@ -44,6 +45,26 @@ const paramLines = computed(() => {
 function fmtPos(pos: [number, number, number] | undefined): string {
   return pos ? `[${pos[0]}, ${pos[1]}, ${pos[2]}]` : '—';
 }
+
+// A5: material → surfaces it is applied to (rect faces / mesh override keys).
+const materialLinks = computed(() => {
+  const sc = props.scenario;
+  if (!sc) {
+    return [] as Array<{ id: string; name: string; color: string; surfaces: string[] }>;
+  }
+  const byMaterial = new Map<string, string[]>();
+  for (const binding of surfaceBindings(sc)) {
+    const list = byMaterial.get(binding.materialId) ?? [];
+    list.push(binding.surface);
+    byMaterial.set(binding.materialId, list);
+  }
+  return sc.materials.map((mat) => ({
+    id: mat.id,
+    name: mat.name,
+    color: materialColor(sc, mat.id),
+    surfaces: byMaterial.get(mat.id) ?? [],
+  }));
+});
 </script>
 
 <template>
@@ -78,9 +99,16 @@ function fmtPos(pos: [number, number, number] | undefined): string {
       <div class="block">
         <div class="label">Materials ({{ scenario.materials.length }})</div>
         <ul>
-          <li v-for="mat in scenario.materials" :key="mat.id" class="mono">
-            {{ mat.id }}
+          <li v-for="mat in materialLinks" :key="mat.id" class="mat-link">
+            <span class="swatch" :style="{ background: mat.color }"></span>
+            <span class="mono">{{ mat.id }}</span>
             <span class="dim"> — {{ mat.name }}</span>
+            <div class="dim mono surfaces">
+              <template v-if="mat.surfaces.length > 0">
+                → {{ mat.surfaces.join(', ') }}
+              </template>
+              <template v-else>→ (unused)</template>
+            </div>
           </li>
         </ul>
       </div>
@@ -156,5 +184,22 @@ ul {
   flex-wrap: wrap;
   gap: 4px 10px;
   margin-top: 2px;
+}
+
+.mat-link {
+  margin-bottom: 4px;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+.surfaces {
+  margin-left: 16px;
+  font-size: 11px;
 }
 </style>

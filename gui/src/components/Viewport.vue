@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import type { JobFieldSummary, JobRays, Scenario } from '../api/types';
+import { fmtBand, materialById, materialColor, surfaceBindings } from '../materials';
 
 // Interactive viewport: room box + source/receiver markers (rect rooms in
 // particular), click select, drag on the camera screen plane (depth toward /
@@ -19,9 +20,14 @@ import type { JobFieldSummary, JobRays, Scenario } from '../api/types';
 // Ray paths: result.rays.paths[] polylines as one LineSegments cloud, vertex
 // color by amplitude (blue = weak → red = strong). Capped at kMaxRayPaths so
 // a large capturePathLimit cannot tank the frame rate.
+//
+// Materials (A1/A2): rect room faces are translucent quads colored by their
+// material id (palette in materials.ts) with a legend overlay; mesh rooms get
+// the legend only (no mesh geometry is loaded client-side). Clicking a face
+// selects it and shows name + materialId + α(f) table.
 
 export interface EntityRef {
-  entityType: 'source' | 'receiver';
+  entityType: 'source' | 'receiver' | 'face';
   id: string;
 }
 
@@ -264,6 +270,129 @@ function toggleRays(): void {
   }
 }
 
+// --- material faces (A1) + face info (A2) ---
+// Rect rooms: one translucent quad per face, colored by its material id via
+// the shared palette, so floor/ceiling/walls read apart at a glance. Mesh rooms
+// get the legend only (mesh geometry is loaded server-side, not into three.js).
+// Face click → selection with entityType 'face'; the overlay shows face name,
+// materialId and the α(f) table of the bound material.
+const kBoxFaceKeys = ['x+', 'x-', 'ceiling', 'floor', 'z+', 'z-'] as const;
+
+let faceBox: THREE.Mesh | null = null;
+const faceMats: THREE.MeshBasicMaterial[] = [];
+
+const materialLegend = computed(() => {
+  const sc = props.scenario;
+  if (!sc) {
+    return [] as Array<{ id: string; name: string; color: string; surfaces: string[] }>;
+  }
+  const bindings = surfaceBindings(sc);
+  return sc.materials.map((mat) => ({
+    id: mat.id,
+    name: mat.name,
+    color: materialColor(sc, mat.id),
+    surfaces: bindings.filter((b) => b.materialId === mat.id).map((b) => b.surface),
+  }));
+});
+
+const faceInfo = computed(() => {
+  const sel = props.selection;
+  const sc = props.scenario;
+  if (!sel || sel.entityType !== 'face' || !sc) {
+    return null;
+  }
+  const materialId =
+    surfaceBindings(sc).find((b) => b.surface === sel.id)?.materialId ?? '';
+  const material = materialById(sc, materialId);
+  return {
+    surface: sel.id,
+    materialId: materialId || '(none)',
+    materialName: material?.name ?? '',
+    bandsHz: material?.bandsHz ?? [],
+    absorption: material?.absorption ?? [],
+  };
+});
+
+function clearFaces(): void {
+  if (faceBox && scene) {
+    scene.remove(faceBox);
+    faceBox.geometry.dispose();
+    faceBox = null;
+  }
+  for (const mat of faceMats) {
+    mat.dispose();
+  }
+  faceMats.length = 0;
+}
+
+function rebuildFaces(): void {
+  clearFaces();
+  const sc = props.scenario;
+  const room = sc?.room;
+  if (!sc || !scene || room?.type !== 'rect' || !room.size) {
+    return;
+  }
+  const { w, h, d } = room.size;
+  const geometry = new THREE.BoxGeometry(w, h, d);
+  // BoxGeometry group order: +x, -x, +y, -y, +z, -z ↔ kBoxFaceKeys.
+  for (const key of kBoxFaceKeys) {
+    const materialId = room.faces?.[key] ?? '';
+    const color = materialId ? materialColor(sc, materialId) : '#8b95a7';
+    faceMats.push(
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(color),
+        transparent: true,
+        opacity: 0.28,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+  }
+  faceBox = new THREE.Mesh(geometry, faceMats);
+  faceBox.position.set(w / 2, h / 2, d / 2);
+  scene.add(faceBox);
+  syncFaceHighlight();
+}
+
+/** Selected face reads hotter (brighter, more opaque) than the rest. */
+function syncFaceHighlight(): void {
+  const sel = props.selection;
+  const selectedFace = sel && sel.entityType === 'face' ? sel.id : '';
+  kBoxFaceKeys.forEach((key, i) => {
+    const mat = faceMats[i];
+    if (!mat) {
+      return;
+    }
+    const base = new THREE.Color(
+      materialColor(props.scenario, props.scenario?.room.faces?.[key] ?? ''),
+    );
+    if (key === selectedFace) {
+      mat.color.copy(base).lerp(new THREE.Color(0xffffff), 0.35);
+      mat.opacity = 0.55;
+    } else {
+      mat.color.copy(base);
+      mat.opacity = 0.28;
+    }
+  });
+}
+
+function hitFace(): string | null {
+  if (!scene || !camera || !faceBox) {
+    return null;
+  }
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObject(faceBox, false);
+  const hit = hits[0];
+  if (!hit) {
+    return null;
+  }
+  // BoxGeometry groups carry their material index in the hit face — that is
+  // exactly kBoxFaceKeys order. faceIndex/2 is the same mapping (2 triangles
+  // per side) and kept as the fallback for unindexed hits.
+  const index = hit.face?.materialIndex ?? (hit.faceIndex !== undefined ? Math.floor(hit.faceIndex / 2) : -1);
+  return kBoxFaceKeys[index] ?? null;
+}
+
 // Drag state (null = orbit controls own the pointer).
 let dragKey = '';
 let gizmoKey = '';
@@ -338,6 +467,7 @@ function applyRoom(): void {
       : { w: 1, h: 1, d: 1 };
   roomBox.scale.set(size.w, size.h, size.d);
   roomBox.position.set(size.w / 2, size.h / 2, size.d / 2);
+  rebuildFaces();
 }
 
 function syncMarkers(): void {
@@ -383,7 +513,7 @@ function syncMarkers(): void {
 function selectedPos(): [number, number, number] | null {
   const sel = props.selection;
   const sc = props.scenario;
-  if (!sel || !sc) {
+  if (!sel || !sc || sel.entityType === 'face') {
     return null;
   }
   const list = sel.entityType === 'source' ? sc.sources : sc.receivers;
@@ -559,11 +689,17 @@ function onPointerUp(event: PointerEvent): void {
     }
     return;
   }
-  // Click on empty space clears the selection (orbit drags are ignored).
+  // Click without drag: face hit selects that face (A2), otherwise the click
+  // is empty space and clears the selection (orbit drags are ignored).
   if (!pointerMoved) {
     setPointer(event);
     if (!hitMarker()) {
-      emit('select', null);
+      const face = hitFace();
+      if (face) {
+        emit('select', { entityType: 'face', id: face });
+      } else {
+        emit('select', null);
+      }
     }
   }
 }
@@ -649,6 +785,7 @@ onMounted(() => {
     () => {
       syncMarkers();
       syncGizmo();
+      syncFaceHighlight();
     },
   );
   watch(snapEnabled, () => applySnapSetting());
@@ -680,6 +817,7 @@ onBeforeUnmount(() => {
   resizeObserver = null;
   clearField();
   clearRays();
+  clearFaces();
   if (transformControls) {
     transformControls.detach();
     if (scene) {
@@ -732,8 +870,8 @@ onBeforeUnmount(() => {
   <div class="viewport">
     <div ref="container" class="canvas-host"></div>
     <div class="overlay dim">
-      Click to select · drag on the screen plane (no depth change) · gizmo
-      arrows move X/Y/Z · orbit with empty drag
+      Click marker or face to select · drag on the screen plane (no depth
+      change) · gizmo arrows move X/Y/Z · orbit with empty drag
       <span v-if="scenario?.room?.type === 'rect'"> · room box from scenario</span>
     </div>
     <div class="tools-box">
@@ -768,7 +906,44 @@ onBeforeUnmount(() => {
         </span>
       </template>
     </div>
-    <div v-if="selection" class="sel-box">
+    <div v-if="materialLegend.length > 0" class="mats-box">
+      <div class="mats-title">Materials</div>
+      <div v-for="row in materialLegend" :key="row.id" class="mat-row">
+        <span class="swatch" :style="{ background: row.color }"></span>
+        <span class="mono">{{ row.id }}</span>
+        <span class="dim mat-surfaces">
+          {{ row.surfaces.length > 0 ? row.surfaces.join(', ') : '(unused)' }}
+        </span>
+      </div>
+    </div>
+    <div v-if="faceInfo" class="face-box">
+      <div class="mats-title">Face</div>
+      <div class="mono">
+        {{ faceInfo.surface }}
+        <span class="dim">→</span>
+        {{ faceInfo.materialId }}
+      </div>
+      <div v-if="faceInfo.materialName" class="dim">{{ faceInfo.materialName }}</div>
+      <table class="alpha-table">
+        <thead>
+          <tr>
+            <th v-for="band in faceInfo.bandsHz" :key="band">{{ fmtBand(band) }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td
+              v-for="(alpha, i) in faceInfo.absorption"
+              :key="faceInfo.bandsHz[i] ?? i"
+              class="mono"
+            >
+              {{ alpha.toFixed(2) }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div v-if="selection && selection.entityType !== 'face'" class="sel-box">
       <span class="mono">{{ selection.entityType }} {{ selection.id }}</span>
       <label>
         X
@@ -935,5 +1110,78 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   color: inherit;
   font: inherit;
+}
+
+.mats-box {
+  position: absolute;
+  bottom: 28px;
+  right: 8px;
+  max-width: 240px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.mats-title {
+  color: var(--text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.mat-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.5;
+}
+
+.mat-row .mono {
+  font-size: 10px;
+}
+
+.mat-surfaces {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.face-box {
+  position: absolute;
+  bottom: 28px;
+  left: 8px;
+  max-width: 280px;
+  padding: 6px 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  pointer-events: auto;
+}
+
+.alpha-table {
+  margin-top: 4px;
+  width: auto;
+  font-size: 10px;
+}
+
+.alpha-table th,
+.alpha-table td {
+  padding: 2px 6px;
+  text-align: right;
+  border-bottom: none;
 }
 </style>
