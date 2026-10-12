@@ -78,7 +78,7 @@ REGISTER_ENGINE(ImageSourceEngine);
 
 | id | Модель | Комнаты | Выдаёт | Фаза |
 |----|--------|---------|--------|------|
-| `sabine-eyring` | Аналитика T=0.161·V/(S·ᾱ) | любые (V, S, α) | RT60 | P0 |
+| `sabine-eyring` | Аналитика T=0.161·V/(S·ᾱ) | rect (V, S, ᾱ) | RT60 | P0 |
 | `image-source` | Зеркальные источники | rect | IR, метрики, ранние пути | P0 |
 | `ray-tracing` | Лучи + BVH | mesh | IR, метрики, paths, поле | P2 |
 | `hybrid` | Один RT-проход, early/late split | mesh | полное IR | P2 |
