@@ -15,8 +15,10 @@ av::Scenario sampleScenario() {
   av::Scenario scenario;
   scenario.schemaVersion = 1;
   scenario.name = "scene-store-demo";
-  scenario.sources.push_back(av::Source{"src-1", av::Vec3{1.0, 1.5, 1.0}, 80.0});
-  scenario.sources.push_back(av::Source{"src-2", av::Vec3{2.0, 1.0, 2.0}, 60.0});
+  scenario.sources.push_back(
+      av::Source{"src-1", av::Vec3{1.0, 1.5, 1.0}, 80.0, {}, {}});
+  scenario.sources.push_back(
+      av::Source{"src-2", av::Vec3{2.0, 1.0, 2.0}, 60.0, {}, {}});
   scenario.receivers.push_back(av::Receiver{"rcv-1", av::Vec3{4.0, 1.5, 3.0}});
   return scenario;
 }

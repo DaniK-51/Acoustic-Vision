@@ -121,6 +121,69 @@ TEST(SourceCatalogTest, RejectsUnknownDirectivityType) {
   EXPECT_THROW(av::sourceCatalogFromJson(json), std::runtime_error);
 }
 
+TEST(SourceCatalogTest, ParsesDirectivityPolarCurves) {
+  nlohmann::json json = sampleCatalog();
+  json["sources"][0]["directivity"]["horizontal"] = {
+      {"freqsHz", {250.0, 1000.0}},
+      {"anglesDeg", {0.0, 90.0, 180.0}},
+      {"gainDb", nlohmann::json::array({nlohmann::json::array({0.0, -6.0, -20.0}),
+                                        nlohmann::json::array({0.0, -9.0, -30.0})})},
+  };
+  json["sources"][0]["directivity"]["vertical"] = {
+      {"freqsHz", {1000.0}},
+      {"anglesDeg", {0.0, 180.0}},
+      {"gainDb", nlohmann::json::array({nlohmann::json::array({0.0, -18.0})})},
+  };
+
+  const av::SourceCatalog catalog = av::sourceCatalogFromJson(json);
+  const av::SourceCatalogDirectivity& directivity =
+      catalog.sources.front().directivity;
+  EXPECT_EQ(directivity.type, "cardioid");
+  ASSERT_TRUE(directivity.horizontal.has_value());
+  EXPECT_EQ(directivity.horizontal->freqsHz.size(), 2u);
+  EXPECT_EQ(directivity.horizontal->gainDb.size(), 2u);
+  EXPECT_EQ(directivity.horizontal->gainDb[1].size(), 3u);
+  ASSERT_TRUE(directivity.vertical.has_value());
+  EXPECT_EQ(directivity.vertical->gainDb[0].size(), 2u);
+
+  // Round-trip keeps the curves.
+  const av::SourceCatalog again =
+      av::sourceCatalogFromJson(av::sourceCatalogToJson(catalog));
+  ASSERT_TRUE(again.sources.front().directivity.horizontal.has_value());
+  EXPECT_EQ(again.sources.front().directivity.horizontal->gainDb,
+            directivity.horizontal->gainDb);
+  ASSERT_TRUE(again.sources.front().directivity.vertical.has_value());
+  EXPECT_EQ(again.sources.front().directivity.vertical->freqsHz,
+            directivity.vertical->freqsHz);
+}
+
+TEST(SourceCatalogTest, RejectsMalformedPolarCurves) {
+  nlohmann::json json = sampleCatalog();
+  // gainDb rows must match anglesDeg length.
+  json["sources"][0]["directivity"]["horizontal"] = {
+      {"freqsHz", {250.0}},
+      {"anglesDeg", {0.0, 90.0}},
+      {"gainDb", nlohmann::json::array({nlohmann::json::array({0.0})})},
+  };
+  EXPECT_THROW(av::sourceCatalogFromJson(json), std::runtime_error);
+
+  // gainDb must have one row per freqsHz entry.
+  json["sources"][0]["directivity"]["horizontal"] = {
+      {"freqsHz", {250.0, 500.0}},
+      {"anglesDeg", {0.0, 90.0}},
+      {"gainDb", nlohmann::json::array({nlohmann::json::array({0.0, -6.0})})},
+  };
+  EXPECT_THROW(av::sourceCatalogFromJson(json), std::runtime_error);
+
+  // Empty bands are not a curve set.
+  json["sources"][0]["directivity"]["horizontal"] = {
+      {"freqsHz", nlohmann::json::array()},
+      {"anglesDeg", {0.0}},
+      {"gainDb", nlohmann::json::array({nlohmann::json::array({0.0})})},
+  };
+  EXPECT_THROW(av::sourceCatalogFromJson(json), std::runtime_error);
+}
+
 TEST(SourceCatalogTest, RejectsMissingPowerDb) {
   nlohmann::json json = sampleCatalog();
   json["sources"][0].erase("powerDb");

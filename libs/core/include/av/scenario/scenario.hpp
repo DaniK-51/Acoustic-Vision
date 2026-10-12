@@ -2,6 +2,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -11,6 +12,7 @@
 #include <av/geometry/mesh.hpp>
 #include <av/geometry/vec3.hpp>
 #include <av/materials/material.hpp>
+#include <av/scenario/directivity.hpp>
 #include <av/units.hpp>
 
 namespace av {
@@ -42,6 +44,11 @@ struct Source {
   std::string id;
   Vec3 position;
   double powerDb = 0.0;
+  // Additive, default 0: absent orientation in JSON means "aimed at +Z".
+  SourceOrientation orientation;
+  // Optional per-source directivity (polar curves and/or analytic type).
+  // Absent = omnidirectional; present overrides any catalog-card pattern.
+  std::optional<Directivity> directivity;
 };
 
 struct Receiver {

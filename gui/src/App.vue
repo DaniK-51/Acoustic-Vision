@@ -27,6 +27,7 @@ import RunControls from './components/RunControls.vue';
 import RunDetailPanel from './components/RunDetail.vue';
 import RunsPanel from './components/RunsPanel.vue';
 import SceneOutlinePanel from './components/SceneOutlinePanel.vue';
+import SourceInspector from './components/SourceInspector.vue';
 import StageBar from './components/StageBar.vue';
 import StatusBar from './components/StatusBar.vue';
 import Viewport, { type EntityRef } from './components/Viewport.vue';
@@ -171,7 +172,10 @@ async function refreshHealth(): Promise<void> {
   }
 }
 
-async function onScenarioSubmit(payload: Scenario | Record<string, unknown>): Promise<void> {
+async function onScenarioSubmit(
+  payload: Scenario | Record<string, unknown>,
+  opts: { keepSelection?: boolean } = {},
+): Promise<void> {
   loadLoading.value = true;
   loadError.value = '';
   try {
@@ -179,10 +183,14 @@ async function onScenarioSubmit(payload: Scenario | Record<string, unknown>): Pr
     sceneId.value = res.sceneId;
     sceneVersion.value = res.sceneVersion;
     scenario.value = payload as Scenario;
-    selection.value = null;
-    // New scene → old heat-map / rays no longer match the geometry.
-    fieldData.value = null;
-    raysData.value = null;
+    // Orientation edits re-store the snapshot and must not clear the selection.
+    if (!opts.keepSelection) {
+      selection.value = null;
+      // New scene → old heat-map / rays no longer match the geometry.
+      // Orientation-only re-stores keep them: the geometry is unchanged.
+      fieldData.value = null;
+      raysData.value = null;
+    }
     patchError.value = '';
     pendingOps = [];
     if (patchTimer !== null) {
@@ -342,6 +350,33 @@ const selectedFace = computed(() =>
   selection.value?.entityType === 'face' ? selection.value.id : null,
 );
 
+/** B1: source-select panel (orientation + polar) follows the viewport pick. */
+const selectedSourceId = computed(() =>
+  selection.value?.entityType === 'source' ? selection.value.id : '',
+);
+
+/**
+ * B1: yaw/pitch edit. scene.patch has no rotate op in v1, so orientation is
+ * persisted like catalog insert — a fresh scenario snapshot — and the
+ * selection is kept so the inspector stays on the edited source.
+ */
+function onSourceOrientation(
+  sourceId: string,
+  yawDeg: number,
+  pitchDeg: number,
+): void {
+  const sc = scenario.value;
+  if (!sc || jobRunning.value) {
+    return;
+  }
+  const sources = (sc.sources ?? []).map((s) =>
+    s.id === sourceId
+      ? { ...s, orientation: { yawDeg, pitchDeg } }
+      : s,
+  );
+  void onScenarioSubmit({ ...sc, sources }, { keepSelection: true });
+}
+
 /** MaterialsPanel row click → same face selection as a viewport click. */
 function onSelectFace(face: string | null): void {
   selection.value = face ? { entityType: 'face', id: face } : null;
@@ -482,6 +517,8 @@ function onCatalogInsert(entry: SourceCatalogEntry): void {
     id: nextSourceId(sc, entry),
     position: [pos[0] + offset, pos[1], pos[2] + offset] as [number, number, number],
     powerDb: entry.powerDb,
+    // B2: carry the card's pattern so the source polar survives save/load.
+    directivity: entry.directivity,
   };
   const next: Scenario = {
     ...sc,
@@ -621,6 +658,14 @@ onBeforeUnmount(() => {
             :scenario="scenario"
             :scene-id="sceneId"
             :scene-version="sceneVersion"
+          />
+          <SourceInspector
+            v-if="selectedSourceId"
+            :scenario="scenario"
+            :source-id="selectedSourceId"
+            :catalog-entries="catalog?.sources ?? []"
+            :disabled="jobRunning"
+            @orientation="onSourceOrientation"
           />
           <MaterialsPanel
             :scenario="scenario"

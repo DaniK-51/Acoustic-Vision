@@ -75,7 +75,16 @@
             "minItems": 3,
             "maxItems": 3
           },
-          "powerDb": { "type": "number" }
+          "powerDb": { "type": "number" },
+          "orientation": {
+            "type": "object",
+            "description": "Optional source aim. yawDeg rotates about +Y: 0 faces +Z, positive turns toward +X. pitchDeg tilts up/down: positive looks up. Both default to 0 when omitted.",
+            "properties": {
+              "yawDeg": { "type": "number" },
+              "pitchDeg": { "type": "number" }
+            }
+          },
+          "directivity": { "$ref": "#/$defs/directivity" }
         }
       }
     },
@@ -117,6 +126,44 @@
             "ny": { "type": "integer", "minimum": 1, "maximum": 64 },
             "nz": { "type": "integer", "minimum": 1, "maximum": 64 }
           }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "directivity": {
+      "type": "object",
+      "required": ["type"],
+      "description": "Source/catalog radiation pattern. type is the analytic family (omni|dipole|cardioid|custom); horizontal/vertical are optional polar curves (azimuth / elevation plane). When curves are omitted, consumers may fall back to an analytic preset for omni/dipole/cardioid — 'custom' without curves has no pattern. Curves are relative gains: 0 dB is the on-axis reference of the source, not an absolute level.",
+      "properties": {
+        "type": { "enum": ["omni", "dipole", "cardioid", "custom"] },
+        "description": { "type": "string" },
+        "horizontal": { "$ref": "#/$defs/polarCurve" },
+        "vertical": { "$ref": "#/$defs/polarCurve" }
+      }
+    },
+    "polarCurve": {
+      "type": "object",
+      "required": ["freqsHz", "anglesDeg", "gainDb"],
+      "description": "Polar curve set: gain (dB) vs angle, one curve per band. freqsHz[i] owns gainDb[i]; each gainDb row is sampled at anglesDeg and must have the same length. Example: freqsHz [125,250,500,1000,2000,4000], anglesDeg [-180,-150,...,180], gainDb = 6 rows x 25 columns.",
+      "properties": {
+        "freqsHz": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 },
+          "minItems": 1
+        },
+        "anglesDeg": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 1
+        },
+        "gainDb": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "number" }
+          },
+          "minItems": 1
         }
       }
     }

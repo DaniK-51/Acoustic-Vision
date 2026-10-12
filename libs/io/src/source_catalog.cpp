@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "directivity_json.hpp"
+
 namespace av {
 namespace {
 
@@ -16,20 +18,6 @@ void requireNonEmptyString(const nlohmann::json& json, const char* field) {
     throw std::runtime_error(std::string("expected non-empty string '") + field +
                              "'");
   }
-}
-
-SourceCatalogDirectivity directivityFromJson(const nlohmann::json& json) {
-  if (!json.is_object()) {
-    throw std::runtime_error("expected a directivity object");
-  }
-  SourceCatalogDirectivity directivity;
-  directivity.type = json.at("type").get<std::string>();
-  if (directivity.type != "omni" && directivity.type != "dipole" &&
-      directivity.type != "cardioid" && directivity.type != "custom") {
-    throw std::runtime_error("directivity.type must be omni|dipole|cardioid|custom");
-  }
-  directivity.description = json.value("description", std::string{});
-  return directivity;
 }
 
 SourceCatalogSpectrum spectrumFromJson(const nlohmann::json& json) {
@@ -67,7 +55,7 @@ SourceCatalogEntry entryFromJson(const nlohmann::json& json) {
   entry.category = json.value("category", std::string{});
   entry.powerDb = json.at("powerDb").get<double>();
   entry.spectrum = spectrumFromJson(json.at("spectrum"));
-  entry.directivity = directivityFromJson(json.at("directivity"));
+  entry.directivity = detail::directivityFromJson(json.at("directivity"));
   entry.notes = json.value("notes", std::string{});
   entry.sourceUrl = json.value("sourceUrl", std::string{});
   entry.disclaimer = json.at("disclaimer").get<std::string>();
@@ -122,10 +110,7 @@ nlohmann::json sourceCatalogEntryToJson(const SourceCatalogEntry& entry) {
   json["powerDb"] = entry.powerDb;
   json["spectrum"] = {{"bandsHz", entry.spectrum.bandsHz},
                       {"responseDb", entry.spectrum.responseDb}};
-  json["directivity"] = {{"type", entry.directivity.type}};
-  if (!entry.directivity.description.empty()) {
-    json["directivity"]["description"] = entry.directivity.description;
-  }
+  json["directivity"] = detail::directivityToJson(entry.directivity);
   if (!entry.notes.empty()) {
     json["notes"] = entry.notes;
   }

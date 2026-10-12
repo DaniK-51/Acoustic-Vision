@@ -7,6 +7,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <av/scenario/directivity.hpp>
+
 namespace av {
 
 // Built-in source catalog (read-only API data, docs/idea.md decision 6).
@@ -17,11 +19,9 @@ namespace av {
 inline constexpr const char* kExampleSpecsDisclaimer =
     "example specs, not verified vendor data";
 
-struct SourceCatalogDirectivity {
-  // "omni" | "dipole" | "cardioid" | "custom"
-  std::string type = "omni";
-  std::string description;
-};
+// Card directivity: analytic type plus optional horizontal/vertical polar
+// curves (same layout as Source.directivity).
+using SourceCatalogDirectivity = Directivity;
 
 struct SourceCatalogSpectrum {
   // Relative level offsets (dB) against the card's broadband powerDb.

@@ -29,10 +29,21 @@ export interface SourceCatalogSpectrum {
   responseDb: number[];
 }
 
-export interface SourceCatalogDirectivity {
+/** gainDb[i] belongs to freqsHz[i]; each row is sampled at anglesDeg. */
+export interface PolarCurve {
+  freqsHz: number[];
+  anglesDeg: number[];
+  gainDb: number[][];
+}
+
+export interface Directivity {
   type: string;
   description?: string;
+  horizontal?: PolarCurve;
+  vertical?: PolarCurve;
 }
+
+export type SourceCatalogDirectivity = Directivity;
 
 export interface SourceCatalogEntry {
   id: string;
@@ -72,10 +83,18 @@ export interface ScenarioRoom {
   mesh?: Record<string, unknown>;
 }
 
+/** yawDeg: 0 faces +Z, positive turns toward +X. pitchDeg: positive looks up. */
+export interface SourceOrientation {
+  yawDeg?: number;
+  pitchDeg?: number;
+}
+
 export interface ScenarioSource {
   id: string;
   position: [number, number, number];
   powerDb: number;
+  orientation?: SourceOrientation;
+  directivity?: Directivity;
 }
 
 export interface ScenarioReceiver {

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import type { SourceCatalog, SourceCatalogEntry } from '../api/types';
+import PolarChart from './PolarChart.vue';
 
 defineProps<{
   catalog: SourceCatalog | null;
@@ -18,6 +19,7 @@ const emit = defineEmits<{
 }>();
 
 // D4: simple about card — name, category, powerDb, directivity, disclaimer.
+// B3: polar chart of the card's directivity curves / analytic preset.
 const aboutEntry = ref<SourceCatalogEntry | null>(null);
 </script>
 
@@ -99,6 +101,8 @@ const aboutEntry = ref<SourceCatalogEntry | null>(null);
             </tr>
           </tbody>
         </table>
+        <!-- B3: polar (angle × dB) for the card's directivity -->
+        <PolarChart :directivity="aboutEntry.directivity" :height="200" />
         <p class="dim disclaimer">{{ aboutEntry.disclaimer }}</p>
       </section>
     </div>

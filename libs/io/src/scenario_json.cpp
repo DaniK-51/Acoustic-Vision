@@ -6,11 +6,16 @@
 #include <utility>
 #include <vector>
 
+#include "directivity_json.hpp"
 #include "json_common.hpp"
 
 namespace av {
 namespace {
 
+using detail::directivityFromJson;
+using detail::directivityToJson;
+using detail::orientationFromJson;
+using detail::orientationToJson;
 using detail::stringMapFromJson;
 using detail::stringMapToJson;
 using detail::vec3FromJson;
@@ -42,6 +47,14 @@ nlohmann::json sourceToJson(const Source& source) {
   json["id"] = source.id;
   json["position"] = vec3ToJson(source.position);
   json["powerDb"] = source.powerDb;
+  // Additive optional fields: only present when the aim is non-default or a
+  // directivity override exists, so legacy scenario JSON stays untouched.
+  if (source.orientation.yawDeg != 0.0 || source.orientation.pitchDeg != 0.0) {
+    json["orientation"] = orientationToJson(source.orientation);
+  }
+  if (source.directivity.has_value()) {
+    json["directivity"] = directivityToJson(*source.directivity);
+  }
   return json;
 }
 
@@ -50,6 +63,12 @@ Source sourceFromJson(const nlohmann::json& json) {
   source.id = json.at("id").get<std::string>();
   source.position = vec3FromJson(json.at("position"));
   source.powerDb = json.value("powerDb", 0.0);
+  if (json.contains("orientation")) {
+    source.orientation = orientationFromJson(json.at("orientation"));
+  }
+  if (json.contains("directivity")) {
+    source.directivity = directivityFromJson(json.at("directivity"));
+  }
   return source;
 }
 

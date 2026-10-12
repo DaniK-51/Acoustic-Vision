@@ -134,6 +134,94 @@ TEST(Io, ScenarioFileRoundTrip) {
   std::filesystem::remove(path);
 }
 
+TEST(Io, SourceOrientationAndDirectivityRoundTrip) {
+  av::Scenario scenario = makeShoeboxScenario();
+  av::Source& source = scenario.sources[0];
+  source.orientation.yawDeg = 30.0;
+  source.orientation.pitchDeg = -10.0;
+  av::Directivity directivity;
+  directivity.type = "cardioid";
+  directivity.description = "forward lobe";
+  av::PolarCurve horizontal;
+  horizontal.freqsHz = {250.0, 1000.0};
+  horizontal.anglesDeg = {0.0, 90.0, 180.0};
+  horizontal.gainDb = {{0.0, -6.0, -20.0}, {0.0, -9.0, -30.0}};
+  directivity.horizontal = horizontal;
+  av::PolarCurve vertical;
+  vertical.freqsHz = {1000.0};
+  vertical.anglesDeg = {0.0, 180.0};
+  vertical.gainDb = {{0.0, -18.0}};
+  directivity.vertical = vertical;
+  source.directivity = directivity;
+
+  const nlohmann::json json = av::scenarioToJson(scenario);
+  ASSERT_TRUE(json["sources"][0].contains("orientation"));
+  EXPECT_DOUBLE_EQ(json["sources"][0]["orientation"]["yawDeg"], 30.0);
+  EXPECT_DOUBLE_EQ(json["sources"][0]["orientation"]["pitchDeg"], -10.0);
+  ASSERT_TRUE(json["sources"][0].contains("directivity"));
+  EXPECT_EQ(json["sources"][0]["directivity"]["type"], "cardioid");
+  EXPECT_EQ(json["sources"][0]["directivity"]["horizontal"]["gainDb"].size(),
+            2U);
+
+  const av::Scenario back = av::scenarioFromJson(json);
+  ASSERT_EQ(back.sources.size(), 1U);
+  EXPECT_DOUBLE_EQ(back.sources[0].orientation.yawDeg, 30.0);
+  EXPECT_DOUBLE_EQ(back.sources[0].orientation.pitchDeg, -10.0);
+  ASSERT_TRUE(back.sources[0].directivity.has_value());
+  EXPECT_EQ(back.sources[0].directivity->type, "cardioid");
+  EXPECT_EQ(back.sources[0].directivity->description, "forward lobe");
+  ASSERT_TRUE(back.sources[0].directivity->horizontal.has_value());
+  EXPECT_EQ(back.sources[0].directivity->horizontal->freqsHz,
+            horizontal.freqsHz);
+  EXPECT_EQ(back.sources[0].directivity->horizontal->anglesDeg,
+            horizontal.anglesDeg);
+  EXPECT_EQ(back.sources[0].directivity->horizontal->gainDb, horizontal.gainDb);
+  ASSERT_TRUE(back.sources[0].directivity->vertical.has_value());
+  EXPECT_EQ(back.sources[0].directivity->vertical->gainDb, vertical.gainDb);
+}
+
+TEST(Io, SourceOrientationDefaultsWhenAbsent) {
+  const av::Scenario scenario = makeShoeboxScenario();
+  const nlohmann::json json = av::scenarioToJson(scenario);
+  // Additive contract: default aim / no override produces legacy JSON.
+  EXPECT_FALSE(json["sources"][0].contains("orientation"));
+  EXPECT_FALSE(json["sources"][0].contains("directivity"));
+
+  nlohmann::json withDefaults = json;
+  withDefaults["sources"][0]["orientation"] =
+      nlohmann::json{{"yawDeg", 0.0}, {"pitchDeg", 0.0}};
+  const av::Scenario back = av::scenarioFromJson(withDefaults);
+  EXPECT_DOUBLE_EQ(back.sources[0].orientation.yawDeg, 0.0);
+  EXPECT_DOUBLE_EQ(back.sources[0].orientation.pitchDeg, 0.0);
+  EXPECT_FALSE(back.sources[0].directivity.has_value());
+}
+
+TEST(Io, SourceDirectivityRejectsMalformedPolarCurve) {
+  const av::Scenario scenario = makeShoeboxScenario();
+  nlohmann::json json = av::scenarioToJson(scenario);
+  json["sources"][0]["directivity"] = {
+      {"type", "custom"},
+      {"horizontal",
+       {{"freqsHz", {250.0, 500.0}},
+        {"anglesDeg", {0.0, 90.0}},
+        // Second row length mismatches anglesDeg.
+        {"gainDb", nlohmann::json::array(
+                       {nlohmann::json::array({0.0, -6.0}),
+                        nlohmann::json::array({0.0})})}}},
+  };
+  EXPECT_THROW(av::scenarioFromJson(json), std::runtime_error);
+
+  json["sources"][0]["directivity"] = {
+      {"type", "hypercardioid"},
+      {"horizontal",
+       {{"freqsHz", {250.0}},
+        {"anglesDeg", {0.0, 90.0}},
+        {"gainDb", nlohmann::json::array(
+                       {nlohmann::json::array({0.0, -6.0})})}}},
+  };
+  EXPECT_THROW(av::scenarioFromJson(json), std::runtime_error);
+}
+
 TEST(Io, WavHeaderMagicAndDataSize) {
   av::IrBuffer ir;
   ir.sampleRate = 16000.0;

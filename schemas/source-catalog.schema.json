@@ -57,9 +57,58 @@
         "directivity": {
           "type": "object",
           "required": ["type"],
+          "description": "Card radiation pattern. type is the analytic family (omni|dipole|cardioid|custom); horizontal/vertical are optional polar curves (azimuth / elevation plane). When curves are omitted, consumers may fall back to an analytic preset for omni/dipole/cardioid — 'custom' without curves has no pattern. Curves are relative gains: 0 dB is the on-axis reference of the card, not an absolute level. polarCurve layout: freqsHz[i] owns gainDb[i]; each gainDb row is sampled at anglesDeg and must have the same length. Example: freqsHz [125,250,500,1000,2000,4000], anglesDeg [-180,-150,...,180], gainDb = 6 rows x 25 columns.",
           "properties": {
             "type": { "enum": ["omni", "dipole", "cardioid", "custom"] },
-            "description": { "type": "string" }
+            "description": { "type": "string" },
+            "horizontal": {
+              "type": "object",
+              "required": ["freqsHz", "anglesDeg", "gainDb"],
+              "properties": {
+                "freqsHz": {
+                  "type": "array",
+                  "items": { "type": "number", "exclusiveMinimum": 0 },
+                  "minItems": 1
+                },
+                "anglesDeg": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 1
+                },
+                "gainDb": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": { "type": "number" }
+                  },
+                  "minItems": 1
+                }
+              }
+            },
+            "vertical": {
+              "type": "object",
+              "required": ["freqsHz", "anglesDeg", "gainDb"],
+              "properties": {
+                "freqsHz": {
+                  "type": "array",
+                  "items": { "type": "number", "exclusiveMinimum": 0 },
+                  "minItems": 1
+                },
+                "anglesDeg": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "minItems": 1
+                },
+                "gainDb": {
+                  "type": "array",
+                  "items": {
+                    "type": "array",
+                    "items": { "type": "number" }
+                  },
+                  "minItems": 1
+                }
+              }
+            }
           }
         },
         "notes": { "type": "string" },
