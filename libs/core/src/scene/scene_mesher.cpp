@@ -123,11 +123,16 @@ void wallLocal(const WallFrame& frame, const Vec3& p, double& s, double& z,
   s = dot(d, frame.dir) - z * dirZ;
 }
 
-// v1 void CSG (architect decision): a void box that *penetrates* the slab and
-// overlaps the face rectangle cuts a simple hole in the inner and/or outer
-// face — whichever face the void reaches in thickness. Touching (zero-volume
-// contact) is not a cut; a void floating entirely inside the thickness cannot
-// be represented and is left to the caller's "not subtracted" note.
+// v1 void CSG (architect decision 6): voids subtract from wall *faces* only.
+// A face is cut where the void removes material up to that face — the void's
+// thickness range must straddle the face plane from the material side
+// (inner face at t=0, outer at t=thickness). Zero-volume contact (a box
+// merely touching the face) subtracts nothing and cuts nothing; a cavity
+// strictly inside the slab is invisible to a surface mesh. The hole is the
+// void's (s, z) footprint clamped to the face rectangle — a simple hole
+// without reveal faces, same as Wall::openings. For a wall baseline not
+// axis-aligned in world space the footprint is the AABB of the projected
+// box (CSG-lite approximation).
 bool voidCutsWall(const Void& voidEntity, const WallFrame& frame,
                   FaceHole& hole, bool& cutInner, bool& cutOuter) {
   const Vec3 lo{std::min(voidEntity.origin.x, voidEntity.origin.x + voidEntity.size.x),
@@ -167,15 +172,18 @@ bool voidCutsWall(const Void& voidEntity, const WallFrame& frame,
   hole.z0 = std::max(0.0, zMin);
   hole.z1 = std::min(frame.height, zMax);
   const bool rectOk = hole.s1 - hole.s0 > kEps && hole.z1 - hole.z0 > kEps;
-  // Penetration, not mere contact: the void must claim slab volume.
-  const bool penetrates = tMin < frame.thickness - kEps && tMax > kEps;
-  cutInner = rectOk && penetrates && tMin < kEps;
-  cutOuter = rectOk && penetrates && tMax > frame.thickness - kEps;
+  // Face open <=> void reaches that plane from the material side.
+  cutInner = rectOk && tMax > kEps && tMin < kEps;
+  cutOuter = rectOk && tMin < frame.thickness - kEps &&
+             tMax > frame.thickness - kEps;
   return cutInner || cutOuter;
 }
 
-std::string zoneName(const std::string& materialId, const char* faceKind) {
-  return materialId.empty() ? std::string(faceKind) : materialId;
+// Zone naming (architect decision 2): materialId wins when present so
+// Mesh.materialSlots are material ids for RT; otherwise the faceKind name
+// under the entity prefix (`wall-<id>-inner`, ...).
+std::string zoneName(const std::string& materialId, const std::string& fallback) {
+  return materialId.empty() ? fallback : materialId;
 }
 
 void addWall(const Wall& wall, const std::vector<const Void*>& voids,
@@ -282,8 +290,10 @@ void addWall(const Wall& wall, const std::vector<const Void*>& voids,
     return corners[index];
   };
 
-  const std::string innerZone = zoneName(wall.faces.inner, "inner");
-  const std::string outerZone = zoneName(wall.faces.outer, "outer");
+  const std::string innerZone =
+      zoneName(wall.faces.inner, wall.id + "-inner");
+  const std::string outerZone =
+      zoneName(wall.faces.outer, wall.id + "-outer");
   for (std::size_t iz = 0; iz + 1 < nZ; ++iz) {
     for (std::size_t is = 0; is + 1 < nS; ++is) {
       const double sMid = 0.5 * (sBreaks[is] + sBreaks[is + 1]);
@@ -305,7 +315,7 @@ void addWall(const Wall& wall, const std::vector<const Void*>& voids,
   }
 
   // Slab caps (openings do not cut them in v1 — see header).
-  const std::string sideZone = zoneName(wall.faces.side, "side");
+  const std::string sideZone = zoneName(wall.faces.side, wall.id + "-side");
   // Bottom: normal -up.
   mesher.quad(corner(0, 0, 0), corner(nS - 1, 0, 0), corner(nS - 1, 0, 1),
               corner(0, 0, 1), sideZone);
