@@ -2,7 +2,7 @@
 
 Open-source инструмент акустического анализа помещений: 3D-сцена → источники → алгоритмы → поле звука, отражения, артефакты.
 
-**Стадия: P0–P3 backend готов** (engines, mesh, field, runs, catalog, scene.patch, REST/WS). GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1: gizmo, материалы, catalog); полный редактор помещений (V0.2) и dynamic DLL — по явному запросу. Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` (~216 tests).
+**Стадия: P0–P3 backend + V0.2 core редактора сцен/mesh** (engines, field, runs, catalog, scene.patch, `/v1/scenes`, gen-mesh, `av-cli mesh`). GUI — прототип (`gui/` GUI1–4 + V0.1.1); полный 3D-DCC и dynamic DLL — по запросу. Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` (~237 tests).
 
 ## Видение
 
@@ -62,11 +62,21 @@ Windows: `cmake --preset windows-msvc-x64-release` (vcpkg).
 1. Поднять API **из корня репозитория**: `build/linux-debug/apps/api/av-api --port 8787`.
 2. Открыть GUI: `cd gui && npm run dev` (или `npm run build && npm start`).
 3. Загрузить demo-сценарий (кнопка **Demo** → **Load**) — появляется `sceneId`. Для mesh-демо с полем и лучами — кнопка **Mesh demo (field)** (тянет `gui/public/demo/box-scenario.json`, `capturePaths: true`, fieldGrid включён). `mesh.uri` = `gui/public/demo/box.obj` и резолвится относительно CWD av-api — потому API и запускают из корня репозитория; иначе пропишите в uri абсолютный путь к `box.obj`.
-4. Перетащить источник мышью в viewport (или ввести X/Z) — позиция уезжает в backend через WS `scene.patch`.
+4. Перетащить источник мышью в viewport (или ввести X/Y/Z, гизмо) — позиция уезжает в backend через WS `scene.patch`.
 5. Нажать **Расчёт** — job, прогресс в статус-баре, результат в истории runs (метрики, `ir.wav`, поле и лучи по запросу engine).
 6. В viewport: переключатели **Field** (heat-map, дБ относительно максимума сетки) и **Rays** (полилинии лучей из `result.rays`, цвет = амплитуда, не более 64 линий).
 
 Повторять шаги 4–5 с разными алгоритмами — история runs сравнивает прогоны.
+
+## Редактор сцен и mesh (V0.2)
+
+```bash
+av-cli gen-mesh box -o room.obj --w 6 --h 2.8 --d 4.5 --scenario room.json
+av-cli mesh scene.json -o out.obj --report report.json --quality standard
+# API: POST /v1/scenes · POST /v1/scenes/{id}/mesh · GET mesh.obj · POST to-scenario
+```
+
+Модель: [`docs/room-editor-mesh.md`](docs/room-editor-mesh.md) · план: [`docs/plan-v0.2.md`](docs/plan-v0.2.md).
 
 ## Структура репозитория
 
@@ -90,6 +100,7 @@ gui/          # Electron + Vue + Three.js (P3, REST/WS /v1)
 | **P1** | av-api REST/WS, JobManager, runs history | done |
 | **P2** | mesh OBJ+glTF, Ray Tracing, hybrid, field | done |
 | **P3 backend** | source catalog, Scene Store, scene.patch | done |
+| **V0.2** | Scene model (wall/solid/void), `av-cli mesh`, `/v1/scenes`, to-scenario | done |
 | **P2.5** | Dynamic plugin SDK (C ABI) | only on request |
 | **P3 GUI** | Electron + Vue + Three.js | прототип GUI1–4 + V0.1.1 (`gui/`); редактор помещений — in progress / on request |
 | **P4** | Research-алгоритмы | later |

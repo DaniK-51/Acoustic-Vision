@@ -29,13 +29,13 @@
 - [x] POST `/v1/scenes/{id}/to-scenario`
 
 ### R10 — Docs + ru-check
-- [ ] README / idea / room-editor-mesh sync
-- [ ] ru-check на русские тексты
-- [ ] EN pass для ARCHITECTURE (technical)
+- [x] README / idea / room-editor-mesh sync
+- [x] RU typography pass («», —, – в диапазонах)
+- [x] EN pass ARCHITECTURE (Scene vs Scenario)
 
 ## DoD V0.2
-- [ ] scene.json редактируется валидно, роунд-трип
-- [ ] wall+opening → OBJ, который грузит fillLoadedMesh
-- [ ] mesh-report показывает warnings
-- [ ] to-scenario → av-cli run / API submit
-- [ ] ctest green; документы вычитаны
+- [x] scene.json редактируется валидно, роунд-трип
+- [x] wall+opening → OBJ, который грузит fillLoadedMesh
+- [x] mesh-report показывает warnings
+- [x] to-scenario → av-cli run / API submit
+- [x] ctest green (237); документы вычитаны

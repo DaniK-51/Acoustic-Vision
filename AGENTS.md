@@ -9,7 +9,7 @@
 
 ## Стадия проекта
 
-**P0–P3 backend delivered**: engines (sabine-eyring, image-source, ray-tracing, hybrid), mesh OBJ+glTF, SpatialField, runs history (runId ≠ jobId), source catalog, Scene Store + WS scene.patch, av-cli, av-api. GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); **редактор помещений (V0.2) и dynamic DLL (P2.5) — только по явному запросу.** ctest baseline ≈216.
+**P0–P3 backend delivered**: engines (sabine-eyring, image-source, ray-tracing, hybrid), mesh OBJ+glTF, SpatialField, runs history (runId ≠ jobId), source catalog, Scene Store + WS scene.patch, av-cli, av-api. GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); **редактор помещений (V0.2) и dynamic DLL (P2.5) — только по явному запросу.** ctest baseline ≈237.
 
 Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать. Новый scope — сначала в docs, потом код.
 

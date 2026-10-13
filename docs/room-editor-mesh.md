@@ -165,12 +165,17 @@ V0.2: **API + schema + box-only hex-box stub** (одна hex-ячейка на `
 
 | Method | Path | Назначение |
 |--------|------|------------|
-| GET/POST | `/v1/scenes` | Scene document (отличается от scenarios) |
-| GET/PATCH | `/v1/scenes/{id}` | CRUD entities / materials / meshSettings |
-| POST | `/v1/scenes/{id}/mesh` | generate surface (или volume) → meshId + report |
-| GET | `/v1/scenes/{id}/mesh` | текущий mesh (summary) |
-| GET | `/v1/scenes/{id}/mesh.obj` | download |
-| POST | `/v1/scenes/{id}/to-scenario` | compile Scene → Scenario (для simulations) |
+| GET/POST | `/v1/scenes` | Scene document (отличается от `/v1/scenarios`) |
+| GET/PUT/PATCH | `/v1/scenes/{id}` | чтение / **замена всего документа** (v1); mesh при замене сбрасывается |
+| POST | `/v1/scenes/{id}/mesh` | job `meshjob-…` → report; `?sync=1` — сразу |
+| GET | `/v1/scenes/{id}/mesh` | состояние job + mesh-report (404 если не генерировали) |
+| GET | `/v1/scenes/{id}/mesh.obj` | download OBJ |
+| POST | `/v1/scenes/{id}/to-scenario` | compile Scene → Scenario (для `/v1/simulations`) |
+
+**Примечания реализации (R9):**
+- mesh-джобы **не** в `JobManager` (`/v1/jobs` — только симуляции); поллинг `/v1/scenes/{id}/mesh`.
+- `to-scenario`: **rect**, если 4 стены без проёмов + 2 SolidBox-плиты пол/потолок (Z-up → Y-up); иначе **mesh** + `ray-tracing`.
+- Floor/ceiling в v1 — `solid_box`-плиты, отдельного типа нет.
 
 **WebSocket (interactive):** `scene.entity.patch` — move/resize wall, change material, openings.  
 (Не путать с существующим `scene.patch` для sources — можно ввести `scene.op` union или отдельный op set. **Решение:** расширить `scene.patch` ops: `moveEntity`, `resizeEntity`, `setFaceMaterial`, `addOpening`.)
