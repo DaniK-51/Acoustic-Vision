@@ -81,13 +81,13 @@ av-cli mesh scene.json -o out.obj --report report.json --quality standard
 ## Структура репозитория
 
 ```
-libs/core     # geometry, materials, metrics, scene model, Engine API (+ ray-tracing, hybrid)
-libs/io       # OBJ/glTF, scenario JSON, WAV, field.json, source catalog
+libs/core     # geometry, materials, metrics, scene model + mesher, Engine API (+ ray-tracing, hybrid)
+libs/io       # OBJ/glTF, scenario/scene JSON, WAV, field.json, mesh-report, source catalog
 libs/sim      # JobManager
 apps/cli      # av-cli
-apps/api      # av-api REST+WS, SceneStore, RunsStore
+apps/api      # av-api REST+WS, SceneStore, EditorSceneStore, RunsStore
 data/         # source_catalog.json
-schemas/      # scenario, engine-descriptor, source-catalog
+schemas/      # scenario, scene, engine-descriptor, source-catalog
 tests/        # unit + api_smoke + cli smoke + fixtures
 gui/          # Electron + Vue + Three.js (P3, REST/WS /v1)
 ```
@@ -102,7 +102,7 @@ gui/          # Electron + Vue + Three.js (P3, REST/WS /v1)
 | **P3 backend** | source catalog, Scene Store, scene.patch | done |
 | **V0.2** | Scene model (wall/solid/void), `av-cli mesh`, `/v1/scenes`, to-scenario | done |
 | **P2.5** | Dynamic plugin SDK (C ABI) | only on request |
-| **P3 GUI** | Electron + Vue + Three.js | прототип GUI1–4 + V0.1.1 (`gui/`); редактор помещений — in progress / on request |
+| **P3 GUI** | Electron + Vue + Three.js | прототип GUI1–4 + V0.1.1 (`gui/`); GUI-слайсы редактора — on request |
 | **P4** | Research-алгоритмы | later |
 | **P5** | Полноценный 3D-редактор (DCC) | later |
 

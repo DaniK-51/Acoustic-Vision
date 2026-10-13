@@ -11,10 +11,10 @@
 - [x] unit tests round-trip + validation errors
 
 ### R7 — Primitives → SurfaceMesh
-- [ ] wall slab (start/end/height/thickness) → quads→tris, zones inner/outer/side
-- [ ] openings (door/window) clip wall face
-- [ ] solid_box + void subtract (simple)
-- [ ] entity→triangle map for picking
+- [x] wall slab (start/end/height/thickness) → quads→tris, zones inner/outer/side
+- [x] openings (door/window) clip wall face (grid split; jamb-граней нет — warning)
+- [x] solid_box + void subtract (simple: void режет грани стен, solids игнорирует)
+- [x] entity→triangle map for picking
 
 ### R8 — Mesh settings + report + CLI
 - [x] `meshSettings.surface` presets draft/standard/fine
@@ -39,3 +39,16 @@
 - [x] mesh-report показывает warnings
 - [x] to-scenario → av-cli run / API submit
 - [x] ctest green (237); документы вычитаны
+
+## Residuals (осознанно не в V0.2)
+
+| Что | Статус | Куда |
+|-----|--------|------|
+| `targetEdge` / `maxEdge` реально измельчают топологию (advancing front / Delaunay) | settings резолвятся в `settingsUsed`, mesh — явные quads/tris | v1.1 |
+| Jamb/reveal-грани проёмов; кап под `sill=0` дверью | grid split + warning | дальше |
+| Void-вычитание из solids (не только граней стен) | limitation + warning per void | дальше |
+| Volume mesh: tets (TetGen/Netgen-подобное), `targetSize` | hex-box stub (1 ячейка на `solid_box`) | дальше |
+| WS entity-ops `moveEntity` / `resizeEntity` / `setFaceMaterial` / `addOpening` | v1: PUT/PATCH всего документа | GUI-слайс |
+| Outline-полигон стены; `transform`/`visible`/`locked`/`tags` | не в schema v1 | GUI-слайс |
+| GET списка `/v1/scenes`, persistence `EditorSceneStore` | in-memory, create/get/replace | дальше |
+| GUI Mesh panel (read-only) | не в scope R10 (docs-only) | GUI-слайс |

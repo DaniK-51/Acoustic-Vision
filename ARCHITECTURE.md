@@ -4,7 +4,7 @@ Open-source room acoustics analysis: 3D scene + sources → geometric acoustics 
 
 **Vision** (voted): 3D scene + sources (custom + catalog «as-is») → multi-algorithm compute runs (may take hours on GPU) with history; interactive editing via WS scene patches (static scene lives on backend). Basic editor first, full DCC later. Artifacts = whatever the engine computes (point / field / rays / IR). No measurement/mic pipeline.
 
-**Stage**: P0–P3 **backend delivered** (engines, mesh, field, runs, catalog, scene.patch, av-cli, av-api). GUI / dynamic DLL only by explicit request.  
+**Stage**: P0–P3 **backend delivered** (engines, mesh, field, runs, catalog, scene.patch, av-cli, av-api) + **V0.2 core** (room-editor Scene model, mesher, `av-cli mesh`, `/v1/scenes` + to-scenario — `docs/room-editor-mesh.md`). GUI / dynamic DLL only by explicit request.  
 **Target OS**: Windows (MSVC). **Language**: C++20. **Delivery**: core first, GUI later.
 
 Companion docs: [`docs/idea.md`](docs/idea.md) · [`docs/engines.md`](docs/engines.md) · [`AGENTS.md`](AGENTS.md)
@@ -164,12 +164,17 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 
 ### runs (history)
 - A **run** = scenario snapshot + engine + params + result id.
-- v1: append-only history per scene (no heavy Study/diff). UI can show two runs side by side.
+- v1: append-only run history (no heavy Study/diff). UI can show two runs side by side.
 - **P1 handle:** `jobId` is the simulation/result/artifact handle (`GET /v1/jobs/{id}/result`, `/ir.wav`, `/field`); WS `simulationId = jobId`.
 - **P2e run record** (in-memory, append on terminal — all terminal states): `id` = **`runId`** (`run-…`, uuid-lite, unique per run), `jobId` field kept as the artifact handle, `engine`, `scenarioName`, `sceneVersion` (set when submitted via `{"sceneId"}`), `submittedAt`, `finishedAt`, `state`, `paramsDigest` (engine + key sim params). `GET /v1/runs?engine=` lists newest first (items carry both `id` and `jobId`); `GET /v1/runs/{id}` accepts **either** `runId` or `jobId` and adds `links` to `result` / `ir.wav` / `field` (paths keyed by `jobId`).
 
-### scene store + interactive patches
-- Backend owns the **Scene Store** (full scenario state, `sceneVersion`, uint64 from 1). In-memory (`SceneStore`, thread-safe); `sceneId` is uuid-lite.
+### Terminology: Scenario vs Scene
+- **Scenario** — the simulation input document (`schemas/scenario.schema.json`): room + materials + sources/receivers + `params`. Submitted to `/v1/simulations`.
+- **Scene** (V0.2 room editor) — a separate editor document (`schemas/scene.schema.json`): wall/solid/void entities + materials + `meshSettings`. Lives at `/v1/scenes`; compiled to a Scenario by `POST /v1/scenes/{id}/to-scenario`. Details: `docs/room-editor-mesh.md`.
+- Wire names `sceneId` / `sceneVersion` / `scene.patch` on the simulation side historically say "scene" but version a stored **Scenario** snapshot — see below. The two stores are separate (ids are valid only in their own store; cross-lookup → 404), even though both mint `scene-…` uuid-lite ids.
+
+### scenario store + interactive patches
+- Backend owns the **Scenario store** (code name `SceneStore`; full scenario state, `sceneVersion`, uint64 from 1). In-memory, thread-safe; `sceneId` is uuid-lite.
 - REST: `POST /v1/scenarios` (scenario JSON → `{sceneId, sceneVersion}`), `GET /v1/scenarios/{sceneId}` (→ `{sceneId, sceneVersion, scenario}`). `POST /v1/simulations` accepts `{"sceneId"}` instead of an inline scenario; the stored snapshot runs and its `sceneVersion` lands in the run record / `paramsDigest`. With `sceneId` the body may also carry a SimParams overlay — top-level `engine` / `methodParams` plus `params` with any of `engine`, `methodParams`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid` — merged onto the snapshot before validate/submit (unknown keys → 400).
 - Interactive edits use WS deltas on `/v1/events`, not full recompute:
   - client → `scene.patch` `{ "op": "scene.patch", sceneId, ops: [...] }`
@@ -183,7 +188,7 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 
   Unknown `op`, unknown entity id, or malformed fields → `scene.error`, scene untouched. `rotate` and material patches are deferred (rejected as unknown ops in v1).
 - Static geometry/materials uploaded once (REST); only movers stream over WS.
-- Compute runs snapshot the scene at `sceneVersion` for reproducibility.
+- Compute runs snapshot the stored scenario at `sceneVersion` for reproducibility.
 
 ### artifacts (engine-defined)
 Engines declare which artifact kinds they produce (`EngineDescriptor.artifacts`):
@@ -210,6 +215,7 @@ Base: `http://localhost:8787/v1` · WS: `ws://localhost:8787/v1/events` · JSON 
 
 ### Resource model
 `material` → referenced by `room` surfaces · `room` · `source` · `receiver` · belong to a `scenario` · `simulation` runs a scenario · `job` wraps an async simulation.
+(V0.2 adds the room-editor `scene` document — entities/materials/`meshSettings` — compiled to a `scenario` via to-scenario; see Terminology above.)
 
 In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later concern; document IDs as UUIDv4.
 
@@ -234,6 +240,17 @@ Implemented (P0–P3 backend):
 | GET | `/v1/jobs/{id}/ir.wav` | IR artifact (WAV binary) |
 | GET | `/v1/jobs/{id}/field` | spatial field grid JSON |
 
+Room-editor Scene documents (V0.2; separate id space, `docs/room-editor-mesh.md` §4):
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/scenes` | create Scene document → `{sceneId, sceneVersion}` |
+| GET | `/v1/scenes/{id}` | `{sceneId, sceneVersion, scene}` |
+| PUT/PATCH | `/v1/scenes/{id}` | full-document replace (drops mesh/report) |
+| POST | `/v1/scenes/{id}/mesh` | mesh job `meshjob-…` (or `?sync=1`); GET `/mesh` polls status + report |
+| GET | `/v1/scenes/{id}/mesh.obj` | generated surface mesh (OBJ) |
+| POST | `/v1/scenes/{id}/to-scenario` | compile Scene → Scenario JSON |
+
 Planned (GUI/editor phase — not implemented yet):
 
 | Method | Path | Purpose |
@@ -247,7 +264,7 @@ Planned (GUI/editor phase — not implemented yet):
 | GET | `/v1/scenarios/{id}/validate` | dry-run: mesh/material/engine checks |
 
 **Two modes:**
-- **Interactive** — WS `scene.patch` / `scene.patched` for mover deltas; backend Scene Store is source of truth. No promise of full acoustic recompute per drag.
+- **Interactive** — WS `scene.patch` / `scene.patched` for mover deltas; the backend Scenario store (`SceneStore`) is source of truth. No promise of full acoustic recompute per drag.
 - **Compute** — `POST /simulations` → job (CPU/GPU, minutes–hours OK); WS `job.progress` / `job.succeeded`. Engines may require extra setup (mesh, grid) via `params.methodParams` + `paramsSchema`.
 
 Errors: RFC7807-ish `{ "type", "title", "status", "detail", "fields"? }`.
@@ -362,13 +379,14 @@ ctest --preset windows-msvc-x64-release
 | **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV export, `av-cli` | **done** — unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
 | **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store | **done** — integration smoke green; `schemas/` contract frozen |
 | **P2** Import + mesh rooms | OBJ/glTF, Mesh, BVH, `ray-tracing`, `hybrid` (one RT pass early/late), paths, field | **done** — glTF room runs; metrics sane vs shoebox |
-| **P3 backend** | source catalog, Scene Store, `scene.patch` | **done** |
+| **P3 backend** | source catalog, Scenario store (`SceneStore`), `scene.patch` | **done** |
+| **V0.2 core** | room-editor Scene model (`scene.schema.json`), mesher, `av-cli mesh`, `/v1/scenes` + to-scenario | **done** — `docs/plan-v0.2.md` |
 | **P2.5** Dynamic plugin SDK | C ABI `av_engine_api_v1`, `LoadLibrary` | **only on request** |
-| **P3 GUI** | Electron+Vue+Three.js | prototype **delivered** (`gui/` slices GUI1–4 + V0.1.1: runs, metrics, field heat-map, rays, gizmo, materials, catalog); room editor (V0.2) **in progress / on request** |
+| **P3 GUI** | Electron+Vue+Three.js | prototype **delivered** (`gui/` slices GUI1–4 + V0.1.1: runs, metrics, field heat-map, rays, gizmo, materials, catalog); room-editor GUI slices (V0.2) **on request** |
 | **P4** Research + catalog | External algorithms as engines, richer source cards | **later** |
 | **P5** Full DCC editor | complex geometry without external editors | **later** |
 
-GUI today (prototype): main process talks REST; renderer subscribes WS; source panel = custom + catalog; heat-map field + reflection rays; run history. Room editor (box/extrude primitives + OBJ/glTF upload, gizmos) is the on-request part. No custom mesh sculpting in v1.5.
+GUI today (prototype): main process talks REST; renderer subscribes WS; source panel = custom + catalog; heat-map field + reflection rays; run history. Room-editor **GUI slices** (entities tree, gizmos on wall/solid, Mesh panel) are the on-request part — the editor core (Scene model, mesher, `/v1/scenes`) is already delivered (V0.2, see `docs/room-editor-mesh.md`). No custom mesh sculpting in v1.5.
 
 ---
 

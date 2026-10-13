@@ -1,109 +1,164 @@
 # Частые вопросы
 
-## Общее
+## Почему `mesh.uri` не находит файл?
 
-### Что такое Acoustic-Vision?
+Разные инструменты резолвят URI по-разному:
 
-Open-source инструмент акустического анализа помещений: 3D-сцена → источники → алгоритмы → поле звука, отражения и артефакты. Ядро на C++20 считает, GUI (Electron + Vue + Three.js) общается с ним только через REST/WS `/v1`.
+| Кто | База |
+|-----|------|
+| `av-cli run` | каталог scenario-файла |
+| `av-api` (`POST /v1/simulations`) | **CWD процесса** |
 
-### Чем Scenario отличается от Scene?
+Поэтому API нужно запускать **из корня репозитория** (как в README и GUI-демо):
 
-**Scenario** — вход симуляции (`schemas/scenario.schema.json`), его запускают в расчёт. **Scene** — документ встроенного редактора (`schemas/scene.schema.json`): стены, проёмы, тела, mesh-настройки. Scene компилируется в Scenario через `POST /v1/scenes/{id}/to-scenario`. Подробнее — [Концепции](/guide/concepts).
+```bash
+build/linux-debug/apps/api/av-api --port 8787
+```
 
-### Почему Y-up в Scenario и Z-up в Scene?
+Либо пропишите в `mesh.uri` **абсолютный** путь к OBJ/glTF. Иначе `POST /v1/simulations` вернёт `400 mesh load failed` — job не стартует.
 
-Scenario наследует соглашение GUI/Three.js: `room.size.h` — высота, `position[1]` — y. Scene — CAD/DCC-конвенция, выдавливание идёт по Z. Компиляция `to-scenario` переводит координаты автоматически.
+«Mesh demo» в GUI использует `gui/public/demo/box.obj` (CWD-relative). Отсюда требование «API из корня».
 
-### Сколько времени идёт расчёт?
+---
 
-Какой как. Аналитика (`sabine-eyring`) — мгновенно; `image-source` зависит от порядка отражений; RT-методы — от `rayCount` и числа отскоков. Job может идти **часы** — обещания «1 секунда на любой алгоритм» нет. Прогресс виден в статус-баре и WS `job.progress`.
+## Z-up или Y-up?
 
-## Расчёт и engines
+| Документ | Вверх | Пример |
+|----------|-------|--------|
+| **Scene** (редактор, `scene.schema.json`) | **Z** | extrude по Z, CAD-логика |
+| **Scenario** (симуляция, GUI viewport) | **Y** | `room.size.h` — высота, `position: [x, y, z]` |
 
-### Какой метод выбрать?
+`to-scenario` переводит Z-up → Y-up автоматически. Если пишете scenario руками: y — вертикаль. Если scene: z — вертикаль.
 
-RT60 по объёму и материалам → `sabine-eyring`. Точные ранние отражения на rect → `image-source`. Произвольная геометрия, поле, лучи → `ray-tracing`. Плотная ранняя часть с быстрым хвостом → `hybrid`. См. [Методы расчёта](/guide/engines).
+---
 
-### Почему `image-source` / `sabine-eyring` отклоняют mesh-сцену?
+## Что такое `fieldGrid`?
 
-У каждого engine есть caps: rect-методы умеют только прямоугольную комнату, RT-методы — только mesh. Несовпадение ловится в `validate()` и отдаётся как `400 scenario validation failed` ещё до старта job.
+`params.fieldGrid` включает пространственное поле (heat-map):
 
-### Зачем `seed` и одинаковый `rayCount` при сравнении прогонов?
+```json
+"fieldGrid": { "enabled": true, "nx": 32, "ny": 16, "nz": 24 }
+```
 
-RT-методы стохастические: без фиксированного `seed` два прогона дадут разные реализации шума. Decay rate и T30 от `rayCount` не зависят, а вот вычитание полей и сравнение амплитуд — зависит.
+| Поле | Диапазон |
+|------|----------|
+| `nx`, `ny`, `nz` | 1…64 |
 
-### Что за «относительные дБ» в поле (field)?
+Поле заполняют engines с артефактом `field` (ray-tracing, hybrid). Значения — линейная энергия (`unit: "energy"`), индекс `x + nx*(y + ny*z)`. Пересчёт в дБ идёт в GUI/API-edge. `bandHz: 0` — broadband.
 
-`field` хранит энергию (`unit: "energy"`). GUI рисует дБ относительно **максимума сетки** — это визуальная шкала, не абсолютный SPL. Абсолют дают `powerDb` источника у RT-методов и отдельная калибровка (которой в v1 нет).
+Без `fieldGrid.enabled` ключ `field` в результате не появится.
 
-### Как получить ранние отражения?
+---
 
-`image-source` на rect или `ray-tracing` / `hybrid` на mesh с `capturePaths` и метриками: `metrics.earlyReflections` — top-K пиков в первые 80 мс (`t`, `amp`, `order`). У `hybrid` раннюю часть можно задать явно: `earlyTimeSec`, `earlyOrder`.
+## Почему GUI не открывает API из браузера (CORS)?
 
-### Как отменить долгий расчёт?
+av-api **не** отдаёт CORS-заголовков. Это desktop-контракт:
 
-`POST /v1/jobs/{jobId}/cancel`. Если job уже завершился — `409 job already finished`. В GUI — кнопка «Отмена».
+- Electron main инжектит заголовки в `onHeadersReceived`;
+- клиент шлёт JSON-body как `text/plain` (без preflight).
 
-## Источники
+В обычном браузере fetch к av-api не заработает. Для скриптов используйте curl / httpx / av-cli.
 
-### `powerDb` — это ватты?
+---
 
-Нет. Это уровень звукового давления в dB SPL @ 1 м на оси. Электрические ватты в модель не входят.
+## `sceneId` из `/v1/scenarios` и `/v1/scenes` — это одно и то же?
 
-### Почему направленность источника не влияет на расчёт?
+**Нет.** Разные id-пространства:
 
-Полярные кривые, `orientation` и тип ДН — часть модели и визуализации (полярный график в GUI). Ядра расчёта v1 сэмплируют направления изотропно; применение ДН в физике — следующий шаг. Не путайте с `powerDb`: он энергию RT-методов масштабирует.
+| Endpoint | Документ | Для чего |
+|----------|----------|----------|
+| `/v1/scenarios` | Scenario | расчёт, Scene Store, scene.patch |
+| `/v1/scenes` | Scene (V0.2) | редактор, mesh, to-scenario |
 
-### Можно ли доверять каталогу источников?
+Совпадения id случайны; не подставляйте один в другой ресурс.
 
-Данные — примеры паспортных значений «как есть», с обязательным disclaimer. Это не проверенные вендорские спецификации. Для ответственных расчётов вводите свой scenario с известными характеристиками.
+---
 
-## API и CLI
+## Чем `runId` отличается от `jobId`?
 
-### Почему curl из браузера не работает?
+| Поле | Роль |
+|------|------|
+| `runId` (`run-…`) | ключ истории, `GET /v1/runs/{id}` |
+| `jobId` | handle артефактов `/v1/jobs/{jobId}/…` |
 
-av-api не отдаёт CORS-заголовков: контракт desktop, CORS инжектит Electron. Обычный fetch из браузера упрётся в preflight; из curl/scripts всё работает.
+`GET /v1/runs/{id}` принимает **либо то, либо другое**; `links` в ответе всегда по `jobId`. В историю попадают все терминальные jobs, включая failed/cancelled.
 
-### `POST /v1/simulations` отвечает `400 mesh load failed`
+---
 
-Не найден OBJ/glTF по `mesh.uri`. av-api резолвирует uri относительно **CWD процесса** — запускайте его из корня репозитория (как GUI-демо) или пропишите абсолютный путь. `av-cli run` резолвит относительно каталога scenario-файла.
+## Расчёт идёт слишком долго. Это нормально?
 
-### Чем `runId` отличается от `jobId`?
+Да. Compute-режим не обещает «1 секунду»: тяжёлые методы (особенно mesh + ray-tracing с большим `rayCount`) могут считаться **минуты и часы**. Ускорение:
 
-`runId` (`run-…`) — ключ истории запусков; `jobId` (`job-…`) — handle артефактов (`/v1/jobs/{jobId}/…`). `GET /v1/runs/{id}` принимает любой из двух. Записи в истории появляются, когда job доходит до терминального состояния.
+| Приём | Эффект |
+|-------|--------|
+| уменьшить `rayCount`, `maxBounces` | быстрее, шумнее |
+| `quality: draft` для mesh | меньше треугольников |
+| меньше `durationSec`, ниже `sampleRate` | короче IR |
+| выключить `fieldGrid`, `capturePaths` | без поля/лучей |
+| `image-source` / `sabine-eyring` для rect | почти мгновенно |
 
-### Где живёт история прогонов?
+Отмена: `POST /v1/jobs/{id}/cancel` (или кнопка в GUI).
 
-В памяти `av-api`. Перезапуск процесса очищает runs и Scene Store — persistency в v1 нет.
+---
 
-### Как скачать IR в WAV?
+## Почему ISM ругается на mesh?
 
-`GET /v1/jobs/{jobId}/ir.wav` (или ссылка `links.ir` из `GET /v1/runs/{id}`). В CLI — файл `ir.wav` в каталоге `-o`.
+`image-source` и `sabine-eyring` — **только rect** (`caps.supportsMesh = false`). Меш-комната → capability mismatch → `400 scenario validation failed`. Используйте `ray-tracing` или `hybrid`.
 
-### Зачем `?sync=1` у `/v1/simulations`?
+---
 
-Синхронный режим ждёт конца расчёта и возвращает Result сразу — удобно для скриптов и smoke-тестов. GUI работает асинхронно: `202 {jobId}` + поллинг/WS.
+## Где лежат engines?
 
-## Mesh и редактор
+In-repo методы — `libs/core/src/acoustics/`:
 
-### Чем surface mesh отличается от volume mesh?
+- `sabine_eyring_engine.cpp`
+- `image_source_engine.cpp`
+- `ray_tracing_engine.cpp`
+- `hybrid_engine.cpp`
+- общий `rt_core.*`
+- регистрация — `builtin_engines.cpp`
 
-Surface — треугольники границ (что едят `ray-tracing`, `hybrid` и экспорт OBJ). Volume — тетры/гексы в объёме, нужны будущим волновым методам; в v1 это каркас API со stub `hex-box`.
+Каталог `engines/` зарезервирован под будущие standalone-модули.
 
-### Что делает `--quality` в `av-cli mesh`?
+---
 
-Полный override плотности: заменяет quality сцены и **сбрасывает** custom `targetEdge` / `maxEdge`, чтобы применился пресет (draft / standard / fine). Без флага явные `targetEdge` / `maxEdge` важнее пресета.
+## Как добавить свой метод?
 
-### Можно ли править сцену дельтами?
+1. Реализовать `IEngine` (`descriptor`, `validate`, `run`).
+2. `REGISTER_ENGINE`.
+3. Тесты (capability mismatch → fail validate).
+4. Строка в `docs/engines.md`.
 
-Для source/receiver — да: WS `scene.patch` (`move`, `setPower`) против snapshot в Scene Store. Сам Scene-документ в v1 обновляется только целиком (`PUT` / `PATCH` `/v1/scenes/{id}`), mesh при этом сбрасывается.
+Метод появится в `GET /v1/engines` и GUI без правок UI. Dynamic DLL (C ABI) — P2.5, только по запросу.
 
-## Ограничения
+---
 
-### Чего нет в v1?
+## Как читать RT60 в metrics?
 
-Замеры помещений (mic/phone/calibration), волновые солверы (FDTD/моды — отдельным engine позже), HRTF/binaural, multi-room, auth, гарантия качества каталога, real-time DSP 60 FPS, полноценный DCC-редактор, dynamic DLL-плагины (P2.5 — по запросу).
+В результате три оценки на полосу:
 
-### Как добавить свой метод расчёта?
+| Ключ | Метод |
+|------|--------|
+| `schroederT30` | backward integration, фит −5…−35 дБ |
+| `sabine` | `T = 0.161 · V / (S · ᾱ)` |
+| `eyring` | с ln(1−ᾱ) |
 
-Реализовать `IEngine`, `REGISTER_ENGINE`, пересобрать — метод появится в `GET /v1/engines` и в GUI без правок UI. Чеклист — [Методы расчёта](/guide/engines) и `docs/engines.md`.
+Сравнивайте их как sanity-check: у rect-комнат они должны быть близки. `edt` — фит 0 → −10 дБ (ранний спад).
+
+---
+
+## Что за `disclaimer` в каталоге?
+
+Каталог источников — данные **«как есть»**, без гарантии качества спеков. Каждая карточка и каталог целиком несут `disclaimer` (example specs, not verified vendor data). Custom-источник всегда работает offline.
+
+---
+
+## Почему runs / scenes пропали после перезапуска?
+
+Store **in-memory**. Persistence (SQLite) — later. Перезапуск av-api чистит Scene Store, editor scenes и runs.
+
+---
+
+## Что не входит в v1?
+
+Measurement/mic/phone pipeline · FDTD/волновые солверы, дифракция · real-time DSP 60 FPS · HRTF · multi-room · distributed compute · auth/multi-tenant · тяжёлый Study/diff · обязательный GPU · полный DCC-редактор.

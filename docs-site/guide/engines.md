@@ -1,170 +1,153 @@
-# Методы расчёта
+# Методы расчёта (engines)
 
-В Acoustic-Vision четыре встроенных engine: `sabine-eyring`, `image-source`, `ray-tracing`, `hybrid`. Каждый — реализация `IEngine` (`descriptor()`, `validate()`, `run()`), зарегистрированная через `REGISTER_ENGINE`. Список и возможности смотрите в `GET /v1/engines` или через `av-cli engines`.
+Четыре встроенных метода: аналитика, зеркальные источники и два mesh-метода на стохастических лучах. Новый метод = один модуль + `REGISTER_ENGINE`, без правок API и GUI.
 
-## Как выбрать метод
+## Сводка
 
-| Задача | Метод | Комната | Почему |
-|--------|-------|---------|--------|
-| Быстрая оценка RT60 по объёму и материалам | `sabine-eyring` | rect | аналитика, мгновенно |
-| Точная ранняя часть IR, порядок отражений | `image-source` | rect | детерминированный ISM |
-| Произвольная геометрия, поле и лучи | `ray-tracing` | mesh | BVH + стохастика |
-| Плотная ранняя часть + быстрый поздний хвост | `hybrid` | mesh | early/late split |
+| id | Модель | Комната | Артефакты | paramsSchema |
+|----|--------|---------|-----------|--------------|
+| `sabine-eyring` | аналитика `T = 0.161·V/(S·ᾱ)` | rect | `metrics` | пустой |
+| `image-source` | зеркальные источники | rect | `metrics`, `ir` | пустой |
+| `ray-tracing` | лучи + BVH | mesh | `metrics`, `ir`, `rays`, `field` | `rayCount`, `maxBounces`, `seed`, `receiverRadius`, `capturePathLimit` |
+| `hybrid` | RT + early/late split | mesh | `metrics`, `ir`, `rays`, `field` | как RT + `earlyTimeSec`, `earlyOrder`, `useSabineTail` |
 
-Тип комнаты жёстко проверяется в `validate()`: rect-методы отклоняют mesh, RT-методы — rect. Несовпадение capability → `400` на границе API (job не стартует).
+Список живьём: `GET /v1/engines` или `av-cli engines`.
+
+## Общие параметры симуляции (`params`)
+
+| Поле | Default | Назначение |
+|------|---------|------------|
+| `engine` | — | id метода |
+| `maxReflectionOrder` | 0 | порядок отражений (1–32), ISM |
+| `sampleRate` | — | Гц |
+| `durationSec` | — | длительность IR |
+| `bandsHz` | 125…4000 | октавные полосы |
+| `speedOfSound` | 343 | м/с |
+| `capturePaths` | false | полилинии лучей |
+| `airAbsorption` | false | поглощение в воздухе |
+| `signedIr` | false | IR со знаком |
+| `fieldGrid` | off | `{enabled, nx, ny, nz}` — сетка поля |
+| `methodParams` | `{}` | параметры конкретного engine |
+
+`fieldGrid.nx/ny/nz` — по 1…64. Поле заполняют engines с артефактом `field` (ray-tracing / hybrid), когда `fieldGrid.enabled = true`.
 
 ## sabine-eyring
 
-| Поле | Значение |
-|------|----------|
-| id | `sabine-eyring` |
-| Имя | Sabine-Eyring Analytic RT60 |
-| Комната | rect (`w × h × d` + материалы граней) |
-| Артефакты | `metrics` |
-| `methodParams` | нет (`paramsSchema` — пустой объект) |
+Аналитическая оценка времени реверберации из объёма V, площади S и среднего поглощения ᾱ(f).
 
-Аналитика по среднему поглощению:
+| | |
+|--|--|
+| Комната | rect |
+| Артефакты | `metrics` (RT60 Sabine, Eyring; без IR) |
+| methodParams | нет |
+| Скорость | мгновенно |
 
-| Формула | Смысл |
-|---------|-------|
-| `T = 0.161 · V / (S · ᾱ)` | RT60 Sabine |
-| Eyring | то же с поправкой `ln(1 − ᾱ)` |
-
-Считает **только** метрики (`rt60[band].sabine` / `.eyring` по полосам), IR не строит. Подходит для экспресс-оценки и сверки RT-методов.
+Используйте для быстрой оценки и sanity-check mesh-методов.
 
 ## image-source
 
-| Поле | Значение |
-|------|----------|
-| id | `image-source` |
-| Имя | Image Source Method |
+Классический метод зеркальных источников (ISM) для прямоугольной комнаты.
+
+| | |
+|--|--|
 | Комната | rect |
 | Артефакты | `metrics`, `ir` |
-| `methodParams` | нет |
+| Управление | `maxReflectionOrder` (1–32) |
+| methodParams | нет (пустой `paramsSchema`) |
 
-Метод зеркальных источников (ISM): перебор решётки отражений до порядка `params.maxReflectionOrder` (1–32). Для каждой пары source × receiver накапливается IR.
+**Требования validate:**
 
-Требования `validate()`:
+- хотя бы один source и один receiver;
+- source/receiver **внутри** комнаты;
+- rect-геометрия (mesh → capability mismatch, `400`).
 
-- хотя бы один источник и один приёмник;
-- все источники и приёмники — **внутри** комнаты.
-
-Метрики: IR-derived (Schroeder T30, EDT, early reflections) плюс аналитические Sabine/Eyring по полосам.
-
-### Конвенции ISM
-
-Источник golden-тестов — менять молча нельзя:
+**Конвенции ISM** (не менять молча — источник golden-тестов):
 
 | Правило | Формула |
 |---------|---------|
 | Задержка | `t = r / c`, `c = 343 м/с` по умолчанию |
-| Геометрическое затухание | амплитуда `∝ 1/r` |
-| Отскок | α — энергетическое поглощение: energy `× (1 − α)`, amplitude `× √(1 − α)` **на полосу** |
+| Затухание | амплитуда `∝ 1/r` |
+| Отскок | energy `× (1-α)`, amplitude `× √(1-α)` **на полосу** |
 | Energy | `energy = amplitude²` |
-| Полярность | по умолчанию energy envelope; `signedIr: true` — IR со знаком |
+| Полярность | по умолчанию energy envelope; `signedIr` — опция |
 
 ## ray-tracing
 
-| Поле | Значение |
-|------|----------|
-| id | `ray-tracing` |
-| Имя | Stochastic Ray Tracing |
-| Комната | mesh (OBJ/glTF) |
+Стохастический трассировщик лучей по mesh + BVH.
+
+| | |
+|--|--|
+| Комната | mesh (`loadedMesh`) |
 | Артефакты | `metrics`, `ir`, `rays`, `field` |
-| `supportsRayPaths` | да |
+| validate | rect отклоняется |
 
-Стохастический трассировщик поверх BVH: из каждого источника бросается `rayCount` лучей, каждый отражается до `maxBounces` раз. Энергия отскоков оседает в IR (сфера приёмника радиуса `receiverRadius`) и в `field`-гриде (если включён `fieldGrid`). При `capturePaths: true` сохраняются полилинии лучей (`rays`).
+### methodParams
 
-### methodParams (ray-tracing)
-
-| Ключ | Default | Смысл |
-|------|---------|-------|
-| `rayCount` | 2000 | лучей на источник |
-| `maxBounces` | 32 | максимум отражений |
-| `seed` | 42 | ГПСЧ — воспроизводимый прогон |
-| `receiverRadius` | 0.5 | радиус «сбора» энергии приёмника, м |
-| `capturePathLimit` | 64 | сколько полилиний сохранять (0 — не сохранять) |
+| Ключ | Тип | Default | Смысл |
+|------|-----|---------|--------|
+| `rayCount` | integer ≥ 1 | 2000 | число лучей на источник |
+| `maxBounces` | integer ≥ 1 | 32 | максимум отражений |
+| `seed` | integer ≥ 0 | 42 | seed ГПСЧ |
+| `receiverRadius` | number > 0 | 0.5 | радиус сферы приёмника, м |
+| `capturePathLimit` | integer ≥ 0 | 64 | cap путей в `rays.paths` |
 
 Если `maxBounces` не задан в `methodParams`, но указан `params.maxReflectionOrder`, берётся `maxReflectionOrder`.
 
-Стохастика: decay rate и T30 не зависят от `rayCount`, но **сравнение** двух прогонов требует одинакового `rayCount` и `seed`.
+Дополнительно `methodParams.capturePaths` может включить сбор путей (OR с `params.capturePaths`).
+
+**Замечания:**
+
+- `rayCount` влияет на абсолютный уровень депозитов; decay rate и T30 от `rayCount` не зависят, но **сравнение** двух прогонов требует одинаковых `rayCount` и `seed`.
+- Лучи и поле заполняются при `capturePaths` / `fieldGrid.enabled`.
+- `CancelToken` опрашивается в циклах — длинные прогоны отменяемы.
 
 ## hybrid
 
-| Поле | Значение |
-|------|----------|
-| id | `hybrid` |
-| Имя | Hybrid (early/late RT) |
-| Комната | mesh |
+Один стохастический RT-проход на mesh (как `ray-tracing`), но ранние/поздние депозиты разведены.
+
+| | |
+|--|--|
+| Комната | mesh (`loadedMesh`) |
 | Артефакты | `metrics`, `ir`, `rays`, `field` |
+| Идея | early → плотный суб-сэмпл депозит; late → экспоненциальный хвост |
 
-Один RT-проход (как у `ray-tracing`), но IR делится на раннюю и позднюю части:
+### methodParams
 
-- депозиты с `pathTime < earlyTimeSec` **или** порядком `≤ earlyOrder` идут в раннюю часть (плотный суб-сэмпл депозит);
-- остальное — в позднюю;
-- сумма — одно `IrBuffer`.
+Все ключи ray-tracing, плюс:
 
-Опция `useSabineTail` заменяет позднюю часть аналитическим экспоненциальным хвостом Сэбина, согласованным по энергии с ранней частью.
+| Ключ | Тип | Default | Смысл |
+|------|-----|---------|--------|
+| `earlyTimeSec` | number ≥ 0 | 0.08 | граница ранней части, с |
+| `earlyOrder` | integer ≥ 0 | 2 | порядок отражений для early |
+| `useSabineTail` | boolean | false | заменить позднюю часть аналитическим хвостом Сэбина |
 
-### methodParams (hybrid)
+Депозит считается ранним, если `pathTime < earlyTimeSec` **или** `order ≤ earlyOrder`. Сумма ранней и поздней частей — одно `IrBuffer`.
 
-Все ключи `ray-tracing` плюс:
+`useSabineTail = true` подставляет после `earlyTimeSec` экспоненциальный энергетический спад, согласованный с Сэбином.
 
-| Ключ | Default | Смысл |
-|------|---------|-------|
-| `earlyTimeSec` | 0.08 | граница ранней части, с |
-| `earlyOrder` | 2 | порядок отражений в раннюю часть |
-| `useSabineTail` | false | аналитический хвост вместо RT-поздней части |
+## Артефакты: что запрашивать
 
-## Caps и артефакты
+| Нужно | Включить | Engine |
+|-------|----------|--------|
+| RT60/EDT | default | любой |
+| IR WAV | engine с `ir` | image-source, ray-tracing, hybrid |
+| Heat-map | `fieldGrid.enabled` | ray-tracing, hybrid |
+| Лучи в 3D | `capturePaths: true` | ray-tracing, hybrid |
 
-`EngineDescriptor` (см. `GET /v1/engines`):
+## Capability mismatch
 
-```json
-{
-  "id": "ray-tracing",
-  "name": "Stochastic Ray Tracing",
-  "version": "0.1.0",
-  "caps": {
-    "supportsRect": false,
-    "supportsMesh": true,
-    "supportsRayPaths": true,
-    "supportsBands": true,
-    "maxOrder": 0
-  },
-  "paramsSchema": { "type": "object", "properties": { "…": "…" } },
-  "artifacts": ["metrics", "ir", "rays", "field"]
-}
-```
+`EngineRegistry` выбирает engine по `params.engine` + типу комнаты. Несовпадение (например ISM + mesh) → **`400`** на границе API (`scenario validation failed` / `unknown engine`) или ошибка validate в CLI. Не запускайте job вслепую — проверяйте `GET /v1/engines` (`caps.supportsRect`, `caps.supportsMesh`).
 
-| Поле caps | Смысл |
-|-----------|-------|
-| `supportsRect` | принимает rect-комнату |
-| `supportsMesh` | принимает mesh (требует загруженный `loadedMesh`) |
-| `supportsRayPaths` | умеет `rays` при `capturePaths` |
-| `supportsBands` | считает по полосам |
-| `maxOrder` | лимит порядка отражений; 0 = не применимо |
+## Как добавить метод
 
-`paramsSchema` — JSON Schema для `params.methodParams`: GUI рисует форму автоматически (number / integer / boolean / string + default / min / max / enum).
+1. Реализовать `IEngine` в `libs/core/src/acoustics/` (или `engines/<name>/`).
+2. Заполнить `descriptor` (+ `paramsSchema`, `artifacts`), `validate`, `run`.
+3. `REGISTER_ENGINE(...)` в `builtin_engines.cpp`.
+4. Юнит/golden-тест при аналитической проверке.
+5. Строка в таблице `docs/engines.md` §4.
 
-## Метрики, которые считают engines
+Метод появится в `GET /v1/engines` и в GUI без правок UI. Полный контракт — `docs/engines.md` и [Engine API](/reference/schema#engine-descriptor).
 
-| Метрика | Определение |
-|---------|-------------|
-| RT60 Schroeder | backward integration, T30: линейный фит −5…−35 дБ |
-| RT60 Sabine | `T = 0.161 · V / (S · ᾱ)` |
-| RT60 Eyring | с поправкой на `ln(1 − ᾱ)` |
-| EDT | Early Decay Time, фит 0 → −10 дБ |
-| EarlyReflections | top-K пиков в первые 80 мс: `t`, `amp`, `order` |
+## Резерв: fdtd / моды
 
-## Как добавить свой engine
-
-1. Реализовать `IEngine` в `libs/core/src/acoustics/` (или в `engines/<name>/`).
-2. Заполнить `descriptor()` (+ `paramsSchema`, `artifacts`), `validate()`, `run()`.
-3. Зарегистрировать `REGISTER_ENGINE(...)` в `builtin_engines.cpp`.
-4. Добавить unit/golden-тест, если есть аналитическая проверка.
-5. Пересобрать — метод появится в `GET /v1/engines` и в GUI без правок UI.
-
-Dynamic DLL C ABI (модель B) — отдельная фаза P2.5, по явному запросу. Контракт descriptor / paramsSchema / Result / cancel уже «плагинный» — внешняя модель его не ломает.
-
-Детали контракта — `docs/engines.md` в репозитории.
+Волновое ядро, LF-моды — later / plugin. Не входит в v1; не путать с геометрической акустикой.

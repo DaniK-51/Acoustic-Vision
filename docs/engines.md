@@ -53,7 +53,7 @@ public:
 REGISTER_ENGINE(ImageSourceEngine);
 ```
 
-`EngineRegistry` отдаёт список descriptor'ов и фабрики по `id`.
+`EngineRegistry` отдаёт список descriptor’ов и фабрики по `id`.
 
 ## 2. Как добавить метод
 

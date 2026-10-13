@@ -1,154 +1,205 @@
 # Симуляция
 
-Два режима работы: **Interactive** — синхронизация сцены через WebSocket, **Compute** — полный расчёт job-ом. История прогонов (runs) сравнивает методы на одной сцене.
+Как устроены запуски: interactive-дельты через WebSocket, compute-jobs через REST, история runs и чтение артефактов.
 
-## Interactive против Compute
+## Два режима
 
-| Режим | Когда | Протокол | Результат |
-|-------|-------|----------|-----------|
-| Interactive | перетаскивание источников, правка мощности | WS `scene.patch` | Scene Store на бэке |
-| Compute | кнопка «Расчёт» | `POST /v1/simulations` → job | полный Result |
+| Режим | Когда | Протокол | Что получаете |
+|-------|-------|----------|----------------|
+| **Interactive** | drag источника, правка позиций | WS `scene.patch` | Scene Store на бэке, `sceneVersion` растёт |
+| **Compute** | кнопка «Расчёт» | `POST /v1/simulations` | job → Result (metrics / ir / field / rays) |
 
-Interactive **не** пересчитывает акустику: он держит живой snapshot сцены, чтобы «Расчёт» стартовал с актуальных позиций. Тяжёлые методы могут считаться часами — это нормально.
+Интерактив **не** пересчитывает полную акустику при каждом движении мыши. Тяжёлый расчёт — отдельный job, может идти **часы**.
 
-## Scene Store (Interactive)
+## Scene Store (interactive)
 
-Полный scenario живёт на backend (в памяти процесса). Клиент создаёт snapshot и шлёт дельты:
+Сцена целиком живёт на backend (in-memory, thread-safe).
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/scenarios \
   -H 'Content-Type: application/json' \
   --data @demo-scenario.json
-# → {"sceneId":"scene-…","sceneVersion":1}
+# → {"sceneId":"…","sceneVersion":1}
 ```
 
-`sceneId` — ключ снапшота, `sceneVersion` растёт с каждым примененным patch. Дельты идут по WS `/v1/events`.
+- `POST /v1/scenarios` — сохранить scenario → `sceneId`, `sceneVersion` (uint64, с 1).
+- `GET /v1/scenarios/{id}` — снапшот + текущий `sceneVersion`.
+- Статика (геометрия, материалы) заливается один раз через REST; через WS идут только movers.
 
-### scene.patch
+### WS `scene.patch`
+
+Клиент → сервер:
 
 ```json
 {
   "op": "scene.patch",
-  "sceneId": "scene-…",
+  "sceneId": "…",
   "ops": [
-    { "op": "move", "entityType": "source", "id": "src-1", "position": [2.0, 1.5, 1.0] },
-    { "op": "setPower", "entityType": "source", "id": "src-1", "powerDb": 85.0 }
+    { "op": "move", "entityType": "source", "id": "src-1", "position": [1.5, 1.5, 1.0] },
+    { "op": "setPower", "entityType": "source", "id": "src-1", "powerDb": 85 }
   ]
 }
 ```
 
-| Op | Кому | Поля |
-|----|------|------|
-| `move` | `source` или `receiver` | `position: [x, y, z]` |
-| `setPower` | только `source` | `powerDb: number` |
+| op | Поля | Эффект |
+|----|------|--------|
+| `move` | `entityType`: `source`\|`receiver`, `id`, `position` | новая позиция |
+| `setPower` | `entityType`: `source`, `id`, `powerDb` | новая мощность |
 
-Правила:
+Все ops в сообщении — all-or-nothing. Одно принятое сообщение = один bump `sceneVersion`. Неизвестный op, id или кривые поля → `scene.error`, сцена не меняется. `rotate` и правки материалов в v1 отклоняются как unknown ops.
 
-- patch применяется **целиком**: если хотя бы одна op невалидна, отклоняются все — полусохранённых mover-состояний не бывает;
-- ответ инициатору — `scene.patched` (с `sceneVersion`, `applied`) или `scene.error` (с `detail`);
-- подписчики этой сцены (`subscribeScene`) получают тот же исход без повторной доставки инициатору.
+Сервер отвечает на соединение инициатора:
 
-## Compute: запуск расчёта
+- `scene.patched` — `{sceneId, sceneVersion, applied}`;
+- `scene.error` — `{detail}`.
 
-### Полный scenario
+Тот же outcome раздаётся подписчикам `subscribeScene` (инициатор исключён — нет двойной доставки).
+
+## Compute job
 
 ```bash
 curl -s -X POST http://127.0.0.1:8787/v1/simulations \
   -H 'Content-Type: application/json' \
-  --data @demo-scenario.json
-# → 202 {"jobId":"job-…"}
+  -d '{"sceneId":"<sceneId>","engine":"ray-tracing","methodParams":{"rayCount":4000}}'
+# → 202 {"jobId":"…"}
 ```
 
-### Overlay поверх снапшота
+Варианты body:
 
-Если в теле есть `sceneId`, сервер берёт snapshot из Scene Store и накладывает допустимые ключи:
+1. **Полный scenario** inline (без `sceneId`) — как в файле.
+2. **`{"sceneId"}`** + overlay: `engine`, `methodParams`, `params` (`engine`, `methodParams`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid`). Неизвестные ключи → `400`.
 
-```json
-{
-  "sceneId": "scene-…",
-  "engine": "ray-tracing",
-  "methodParams": { "rayCount": 8000, "seed": 7 },
-  "params": { "capturePaths": true, "fieldGrid": { "enabled": true, "nx": 16, "ny": 8, "nz": 16 } }
-}
-```
+Снапшот сцены фиксируется на момент submit; его `sceneVersion` попадает в run record / `paramsDigest` — прогон воспроизводим.
 
-С `sceneId` принимаются только `engine`, `methodParams`, `params` (плюс сам `sceneId`). Ключи overlay внутри `params` — те же, что в SimParams: `engine`, `methodParams`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid`. Неизвестный ключ → `400`.
+До старта job API фейлит fast:
 
-### Синхронный режим
+| Условие | Ответ |
+|---------|--------|
+| кривой JSON / scenario | `400 invalid …` |
+| mesh не загрузился | `400 mesh load failed` |
+| неизвестный engine | `400 unknown engine` |
+| capability mismatch / validate | `400 scenario validation failed` |
+| нет `sceneId` в store | `404 scene not found` |
 
-`POST /v1/simulations?sync=1` ждёт конца job и возвращает Result сразу (плюс `jobId`, `state`). Если job упал — `500 simulation failed`. Синхронный запуск удобен для скриптов; GUI работает асинхронно.
+### Sync-режим
+
+`POST /v1/simulations?sync=1` — ждать завершения и вернуть Result (+ `jobId`, `state`). Неудача — `500 simulation failed`. Удобно для скриптов и smoke-тестов.
 
 ### Жизненный цикл job
 
-| Состояние | Смысл |
-|-----------|-------|
-| `queued` | в очереди |
-| `running` | считает (прогресс — WS `job.progress` и `GET /v1/jobs/{id}`) |
-| `succeeded` | Result готов |
-| `failed` | ошибка (текст в `error`) |
-| `cancelled` | отменён `POST /v1/jobs/{id}/cancel` |
+`queued → running → succeeded | failed | cancelled`.
 
-Mesh-джобы редактора сцен в `/v1/jobs` **не** попадают — их поллят через `GET /v1/scenes/{id}/mesh`.
+| Метод | Путь | Назначение |
+|-------|------|------------|
+| GET | `/v1/jobs/{id}` | статус, progress, error |
+| POST | `/v1/jobs/{id}/cancel` | отмена (если уже finished — `409`) |
+| GET | `/v1/jobs/{id}/result` | Result JSON (`409`, пока нет результата) |
+| GET | `/v1/jobs/{id}/ir.wav` | WAV (`404`, если IR нет) |
+| GET | `/v1/jobs/{id}/field` | поле (`404`, если field нет) |
 
-## Run: история запусков
+Progress на WS:
 
-Один **run** = scenario + engine + params + Result. История — append-only список (новые сверху), сравнивает прогоны между методами и параметрами.
-
-| Поле | Смысл |
-|------|-------|
-| `id` (`run-…`) | ключ истории |
-| `jobId` | handle артефактов: `/v1/jobs/{jobId}/…` |
-| `engine`, `scenarioName`, `sceneVersion` | контекст прогона |
-| `state`, `submittedAt`, `finishedAt` | жизненный цикл |
-| `paramsDigest` | engine + ключевые sim-параметры (включая `sceneVersion` при overlay) |
-
-`runId` и `jobId` — **не одно и то же**: `runId` живёт в истории, `jobId` указывает на артефакты. `GET /v1/runs/{id}` принимает любой из двух.
-
-Полезные ссылки из `GET /v1/runs/{id}`: `links.result`, `links.ir`, `links.field` — готовые пути к артефактам job.
-
-## Артефакты результата
-
-Result — единый контракт: ключи появляются, только если engine их выдал (`artifacts` в descriptor).
-
-### metrics
-
-`rt60` по полосам (ключ — центр полосы в Гц, `"0"` — broadband): `schroederT30`, `sabine`, `eyring`; `edt` по полосам; `earlyReflections` — массив `{ t, amp, order }`.
-
-### ir (Impulse Response)
-
-Многоканальный broadband-буфер: канал на пару `source × receiver`, имя `srcId:rcvId`. В JSON результата — метаданные (`sampleRate`, `durationSec`, `channels`, `channelNames`, `bandsHz`); сами сэмплы — в WAV:
-
-```bash
-curl -s -o ir.wav http://127.0.0.1:8787/v1/jobs/<jobId>/ir.wav
+```json
+{ "event": "job.progress", "jobId": "…", "fraction": 0.42, "stage": "trace" }
 ```
 
-### field (пространственное поле)
+Terminal: `job.succeeded` (+ `summary`), `job.failed`, `job.cancelled`. REST-polling `/v1/jobs/{id}` — fallback, WS — progressive enhancement.
 
-3D-грид энергии: `nx`, `ny`, `nz`, `origin`, `cellSize`, `bandHz` (0 = broadband), `unit: "energy"`, линейный `values` с индексом `x + nx*(y + ny*z)`. Пересчёт в дБ (относительно максимума сетки) — на стороне UI. Включается `params.fieldGrid`.
+Подписка на job:
 
-### rays (лучи)
+```json
+{ "op": "subscribe", "jobId": "…" }
+```
 
-`paths[]`: `{ points, amplitude, order }` — полилинии в мировых координатах. Появляются при `capturePaths: true` и `supportsRayPaths` у engine. GUI рисует не более 64 линий.
+`jobId: "*"` — на все jobs. Подписка на сцену: `{ "op": "subscribeScene", "sceneId": "…" }` → ack `scene.subscribed`.
 
-## События WebSocket
+## Run history
 
-Подписка на job: `{"op":"subscribe","jobId":"job-…"}` (или `jobId:"*"` — все jobs). События:
+Все терминальные jobs (включая failed/cancelled) попадают в историю.
 
-| Событие | Поля |
-|---------|------|
-| `job.progress` | `jobId`, `fraction`, `stage` |
-| `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
-| `job.failed` | `jobId`, `error` |
-| `job.cancelled` | `jobId` |
+```bash
+curl -s http://127.0.0.1:8787/v1/runs
+curl -s http://127.0.0.1:8787/v1/runs?engine=ray-tracing
+curl -s http://127.0.0.1:8787/v1/runs/<runId или jobId>
+```
 
-Подписка на сцену: `{"op":"subscribeScene","sceneId":"scene-…"}` → ack `scene.subscribed`. Дальше — `scene.patched` / `scene.error` (см. выше).
+| Поле | Смысл |
+|------|--------|
+| `id` | `runId` (`run-…`) |
+| `jobId` | handle артефактов |
+| `engine`, `scenarioName`, `sceneVersion` | контекст |
+| `state`, `submittedAt`, `finishedAt` | lifecycle |
+| `paramsDigest` | engine + ключевые params |
+| `links` | `/v1/jobs/{jobId}/result`, `/ir.wav`, `/field` |
 
-Некорректные и неизвестные кадры сервер молча игнорирует: REST остаётся авторитетным контрактом.
+Список — новые сверху. `GET /v1/runs/{id}` принимает `runId` **или** `jobId`; `links` всегда по `jobId`.
 
-## Практический сценарий сравнения методов
+## Result: что читать
 
-1. Загрузить сцену: `POST /v1/scenarios` → `sceneId`.
-2. Запустить `sabine-eyring` для базовой линии RT60.
-3. Запустить `image-source` (rect) с `maxReflectionOrder: 3–5` — ранние отражения и IR.
-4. Для mesh-сцены — `ray-tracing` и `hybrid` с одинаковыми `rayCount` и `seed`.
-5. Сверить `GET /v1/runs` — `paramsDigest` подскажет, чем прогоны различались.
+```json
+{
+  "metrics": {
+    "rt60": {
+      "500": { "schroederT30": 0.42, "sabine": 0.40, "eyring": 0.41 }
+    },
+    "edt": { "500": 0.31 },
+    "earlyReflections": [{ "t": 0.012, "amp": 0.4, "order": 1 }]
+  },
+  "ir": {
+    "sampleRate": 48000,
+    "durationSec": 1.5,
+    "channels": 1,
+    "channelNames": ["src-1:rcv-1"],
+    "bandsHz": []
+  },
+  "field": {
+    "nx": 32, "ny": 16, "nz": 24,
+    "origin": [0, 0, 0],
+    "cellSize": 0.19,
+    "bandHz": 1000,
+    "unit": "energy",
+    "values": []
+  },
+  "rays": {
+    "paths": [
+      { "points": [[0, 0, 0], [1, 0, 0]], "amplitude": 0.9, "order": 1 }
+    ]
+  }
+}
+```
+
+Ключи `ir` / `field` / `rays` появляются, только если engine их выдал.
+
+### Field (heat-map)
+
+- Линейная энергия, `unit: "energy"`.
+- Индекс: `x + nx*(y + ny*z)` — x самый быстрый.
+- `bandHz: 0` = broadband.
+- Пересчёт в дБ — на клиенте (относительно максимума сетки; в GUI порог −30 дБ).
+
+### Rays
+
+- `capturePaths: true` и caps `supportsRayPaths`.
+- `capturePathLimit` ограничивает число полилиний (GUI рисует ≤ 64).
+- Цвет линий в GUI = амплитуда относительно сильнейшего луча.
+
+### IR
+
+- Канал на пару source × receiver, имя `srcId:rcvId`.
+- Скачать: `GET /v1/jobs/{jobId}/ir.wav` (float32 PCM WAV).
+- График в GUI парсит WAV на клиенте.
+
+## Практический сценарий
+
+1. Залить scenario → `sceneId`.
+2. Двигать источники через `scene.patch` (или GUI drag).
+3. Выбрать engine + `methodParams` → `POST /v1/simulations`.
+4. Следить за `job.progress` / поллить job.
+5. Открыть run: метрики, IR, field, rays.
+6. Повторить с другим engine — сравнить два run’а визуально.
+
+## Ограничения
+
+- Store in-memory: перезапуск av-api сбрасывает scenes и runs.
+- Persistence (SQLite) — later.
+- Нет Study/diff-конвейера — только история и визуальное сравнение.

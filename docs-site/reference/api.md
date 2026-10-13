@@ -1,226 +1,273 @@
 # REST API и WebSocket
 
-Base URL: `http://127.0.0.1:8787/v1` (порт — флаг `av-api --port`). Все тела — JSON, кроме `ir.wav` и `mesh.obj`. Ошибки — объект в духе problem+json:
+Base: `http://localhost:8787/v1` · WS: `ws://localhost:8787/v1/events` · JSON only · `Content-Type: application/json`.
+
+Контракт вытекает из `apps/api/routes_*.cpp`. Store in-memory; перезапуск av-api сбрасывает данные.
+
+## Ошибки
+
+Формат RFC7807-ish:
 
 ```json
-{ "type": "about:blank", "title": "scenario validation failed", "status": 400, "detail": "…" }
+{
+  "type": "about:blank",
+  "title": "job not found",
+  "status": 404,
+  "detail": "job-123",
+  "fields": {}
+}
 ```
 
-Список маршрутов ниже соответствует `apps/api/routes_*.cpp`.
+| Поле | Смысл |
+|------|--------|
+| `type` | тип проблемы |
+| `title` | короткий заголовок |
+| `status` | HTTP-код |
+| `detail` | детали (id, state, текст исключения) |
+| `fields` | опционально |
 
-## Метаданные
+Типовые коды:
 
-### GET /v1/health
+| Код | Когда |
+|-----|--------|
+| 400 | кривой JSON / scenario / scene / overlay / validate / mesh load |
+| 404 | job, run, scene не найдены; нет артефакта |
+| 409 | result ещё нет / job уже finished |
+| 500 | simulation failed / to-scenario failed |
+
+---
+
+## Служебные
+
+### GET `/v1/health`
+
+Liveness + версия.
 
 ```json
 { "status": "ok", "version": "…", "engines": ["sabine-eyring", "image-source", "ray-tracing", "hybrid"] }
 ```
 
-### GET /v1/engines
+### GET `/v1/engines`
 
-Массив `EngineDescriptor`: `id`, `name`, `version`, `caps`, `paramsSchema`, `artifacts`. GUI строит dropdown и форму `methodParams` из этого ответа.
+Массив `EngineDescriptor`: `id`, `name`, `version`, `caps`, `paramsSchema`, `artifacts`.
 
-### GET /v1/bands
+### GET `/v1/bands`
 
 ```json
 { "bandsHz": [125, 250, 500, 1000, 2000, 4000] }
 ```
 
-Default-полосы расчёта. Свои полосы — `params.bandsHz` сценария.
+### GET `/v1/source-catalog`
 
-### GET /v1/source-catalog
+Built-in каталог приборов. Всегда `200` (пустой список, если файл не загрузился). Формат — [Источники](/guide/sources) и `schemas/source-catalog.schema.json`.
 
-Каталог приборов: `{ schemaVersion?, disclaimer, sources: [...] }`. Всегда `200`; пустой `sources`, если файл каталога не загрузился. Данные — «как есть», disclaimer обязателен. Подробнее — [Источники](/guide/sources).
+---
 
-## Scenario Store
+## Scenarios (Scene Store)
 
-### POST /v1/scenarios
+### POST `/v1/scenarios`
 
-Тело — полный Scenario JSON. Создаёт snapshot в Scene Store.
+Body — scenario JSON. Ответ `201`:
 
-Ответ `201`: `{ "sceneId": "scene-…", "sceneVersion": 1 }`.
+```json
+{ "sceneId": "…", "sceneVersion": 1 }
+```
 
-Ошибки: `400 invalid JSON body` / `400 invalid scenario`.
+### GET `/v1/scenarios/{id}`
 
-### GET /v1/scenarios/{sceneId}
+```json
+{ "sceneId": "…", "sceneVersion": 1, "scenario": { … } }
+```
 
-`200`: `{ "sceneId", "sceneVersion", "scenario": { … } }`; `404 scene not found`.
+`404 scene not found`.
 
-## Симуляции
+> Не путать с `/v1/scenes` — это документ редактора (V0.2), отдельное id-пространство.
 
-### POST /v1/simulations
+---
 
-Два вида тела:
+## Simulations
 
-1. **Полный scenario** (без `sceneId`) — как файл сценария.
-2. **Overlay**: `{ "sceneId", "engine"?, "methodParams"?, "params"? }` — snapshot + допустимые ключи SimParams.
+### POST `/v1/simulations`
 
-Ошибки: `400 invalid submit body` (лишние ключи при `sceneId`, неизвестный override), `404 scene not found`, `400 mesh load failed`, `400 unknown engine`, `400 scenario validation failed`.
+**Вариант 1 — inline scenario** (без `sceneId`): body = полный scenario JSON.
 
-Ответы:
+**Вариант 2 — `{"sceneId"}`** + overlay:
 
-| Режим | Код | Тело |
-|-------|-----|------|
-| async (default) | `202` | `{ "jobId": "job-…" }` |
-| `?sync=1` (или `?sync=true`) | `200` | Result + `jobId`, `state` |
-| sync, job упал | `500` | `simulation failed` |
+| Ключ body | Смысл |
+|-----------|--------|
+| `sceneId` | обязательная строка |
+| `engine`, `methodParams` | shorthand для `params.*` |
+| `params` | объект-override: `engine`, `methodParams`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid` |
+
+Неизвестные ключи рядом с `sceneId` → `400`. `methodParams` / `fieldGrid` должны быть объектами.
+
+**Query:** `?sync=1` — синхронный запуск.
+
+**Async (default):** `202 { "jobId": "…" }`.  
+**Sync:** `200` — Result JSON + `jobId` + `state`; при падении `500 simulation failed`.
+
+До submit: `400 invalid JSON body` / `invalid scenario` / `mesh load failed` / `unknown engine` / `scenario validation failed`; `404 scene not found`.
+
+Mesh-URI резолвятся против **CWD процесса av-api**.
+
+---
 
 ## Jobs
 
-### GET /v1/jobs/{jobId}
+### GET `/v1/jobs/{id}`
 
-```json
-{
-  "id": "job-…",
-  "state": "running",
-  "progress": { "fraction": 0.42, "stage": "ray-tracing" },
-  "error": ""
-}
-```
+Статус job: `jobId`, `state` (`queued`/`running`/`succeeded`/`failed`/`cancelled`), progress, error. `404 job not found`.
 
-`state`: `queued` / `running` / `succeeded` / `failed` / `cancelled`. `404 job not found`.
+### POST `/v1/jobs/{id}/cancel`
 
-### POST /v1/jobs/{jobId}/cancel
+Запрос отмены. `404` если нет; `409 job already finished` если уже терминален. Ответ — текущий статус.
 
-`200` — тот же объект статуса (после отмены); `404 job not found`; `409 job already finished`, если job уже в терминальном состоянии.
+### GET `/v1/jobs/{id}/result`
 
-### GET /v1/jobs/{jobId}/result
+Result JSON (`resultToJson`). `metrics` присутствует всегда (возможно, пустым); `ir` / `field` / `rays` — только если engine их выдал; сэмплы IR в JSON не кладутся — они в WAV. `409 result not available`, пока job не succeeded. `404 job not found`.
 
-`200` — Result JSON (см. ниже). `404 job not found`; `409 result not available`, если job ещё не succeeded (`detail` содержит `state=` и текст ошибки).
+### GET `/v1/jobs/{id}/ir.wav`
 
-Форма Result (`resultToJson`):
+WAV (float32 PCM), `Content-Type: audio/wav`. `404 ir not available`, если артефакта нет.
 
-```json
-{
-  "metrics": {
-    "rt60": { "500": { "schroederT30": 0.85, "sabine": 0.9, "eyring": 0.87 } },
-    "edt": { "0": 0.12 },
-    "earlyReflections": [ { "t": 0.011, "amp": 0.4, "order": 1 } ]
-  },
-  "ir": { "sampleRate": 48000, "durationSec": 1.5, "channels": 1, "channelNames": ["src-1:rcv-1"], "bandsHz": [] },
-  "field": { "nx": 16, "ny": 8, "nz": 16, "origin": [0, 0, 0], "cellSize": 0.25, "bandHz": 0, "unit": "energy", "values": [ … ] },
-  "rays": { "paths": [ { "points": [[0,0,0],[1,0,0]], "amplitude": 0.8, "order": 2 } ] }
-}
-```
+### GET `/v1/jobs/{id}/field`
 
-`metrics` присутствует всегда (возможно, пустым); `ir` / `field` / `rays` — только если engine их выдал. Сами сэмплы IR в JSON не кладутся — за ними в WAV.
+Spatial field grid JSON. `404 field not available`, если поля нет.
 
-### GET /v1/jobs/{jobId}/ir.wav
-
-`200` `audio/wav` — многоканальный WAV (канал на пару source × receiver). `404` (`job not found` / `ir not available`).
-
-### GET /v1/jobs/{jobId}/field
-
-`200` — field JSON (тот же объект, что `result.field`). `404` (`job not found` / `field not available`).
+---
 
 ## Runs (история)
 
-### GET /v1/runs
+### GET `/v1/runs`
 
-Массив сводок, новые сверху. Query `?engine=ray-tracing` — фильтр по engine.
+Массив run-summary, **новые сверху**. Query `?engine=` — фильтр.
 
-```json
-[
-  {
-    "id": "run-…",
-    "jobId": "job-…",
-    "engine": "hybrid",
-    "scenarioName": "demo",
-    "sceneVersion": 3,
-    "state": "succeeded",
-    "submittedAt": "2026-01-15T10:00:00.000Z",
-    "finishedAt": "2026-01-15T10:00:04.210Z",
-    "paramsDigest": { "engine": "hybrid", "…": "…" }
-  }
-]
-```
+Поля элемента: `id` (runId), `jobId`, `engine`, `scenarioName`, `sceneVersion`, `state`, `submittedAt`, `finishedAt`, `paramsDigest`.
 
-`id` — ключ истории (`run-…`), `jobId` — handle артефактов. Записи append-on-terminal; GET дополнительно сверяет терминальные jobs, чтобы быстрый прогон был виден сразу.
+### GET `/v1/runs/{id}`
 
-### GET /v1/runs/{id}
-
-Принимает **либо `runId`, либо `jobId`**. `200` — сводка плюс ссылки:
+Принимает **`runId` или `jobId`**. Полная запись + `links`:
 
 ```json
 {
-  "id": "run-…",
-  "jobId": "job-…",
-  "…": "…",
   "links": {
-    "result": "/v1/jobs/job-…/result",
-    "ir": "/v1/jobs/job-…/ir.wav",
-    "field": "/v1/jobs/job-…/field"
+    "result": "/v1/jobs/<jobId>/result",
+    "ir": "/v1/jobs/<jobId>/ir.wav",
+    "field": "/v1/jobs/<jobId>/field"
   }
 }
 ```
 
-`404 run not found`.
+`404 run not found`. Все терминальные jobs (включая failed/cancelled) попадают в историю.
 
-## Редактор сцен (V0.2)
+---
 
-Отдельное id-пространство от Scenario Store. Хранение — в памяти.
+## Scenes (редактор V0.2)
 
-| Метод | Путь | Назначение |
-|-------|------|------------|
-| POST | `/v1/scenes` | создать Scene (тело — Scene JSON) → `201 {sceneId, sceneVersion}` |
-| GET | `/v1/scenes/{id}` | `200 {sceneId, sceneVersion, scene}` |
-| PUT, PATCH | `/v1/scenes/{id}` | **замена всего документа** → `200 {sceneId, sceneVersion}`; mesh сбрасывается |
-| POST | `/v1/scenes/{id}/mesh` | генерация mesh; `?sync=1` — сразу report, иначе `202 {sceneId, jobId, state}` |
-| GET | `/v1/scenes/{id}/mesh` | `200 {sceneId, sceneVersion, jobId, state, report?, error?}`; `404` если не генерировали |
-| GET | `/v1/scenes/{id}/mesh.obj` | `200 model/obj`; `404` если mesh нет |
-| POST | `/v1/scenes/{id}/to-scenario` | compile Scene → Scenario JSON |
+Отдельная id-пространство от `/v1/scenarios`. Схема — `schemas/scene.schema.json`.
 
-Ошибки: `400 invalid JSON body` / `400 invalid scene` / `400 scene validation failed`; `500 to-scenario failed`.
+### POST `/v1/scenes`
 
-Mesh-джобы **не** живут в `/v1/jobs` — поллите `GET /v1/scenes/{id}/mesh`.
+Body — scene JSON. `201 { sceneId, sceneVersion }`. Ошибки parse/validate → `400`.
 
-## WebSocket /v1/events
+### GET `/v1/scenes/{id}`
 
-Один endpoint, три клиентские операции (JSON-кадры, бинарные игнорируются):
+`{ sceneId, sceneVersion, scene }`. `404 scene not found`.
 
-| Op | Тело | Эффект |
+### PUT / PATCH `/v1/scenes/{id}`
+
+**Замена всего документа** (v1; PATCH = тот же handler). Валидация как у POST. `200 { sceneId, sceneVersion }`. Mesh при замене сбрасывается.
+
+### POST `/v1/scenes/{id}/mesh`
+
+Генерация surface mesh. Query `?sync=1` — сразу вернуть отчёт.
+
+- Async: `202 { sceneId, jobId, state: "running" }`.
+- Sync: статус mesh-job + `report` (если готов).
+
+Mesh-job id (`meshjob-…`) **не** живёт в `/v1/jobs`.
+
+### GET `/v1/scenes/{id}/mesh`
+
+Состояние:
+
+```json
+{
+  "sceneId": "…",
+  "sceneVersion": 1,
+  "jobId": "meshjob-…",
+  "state": "succeeded",
+  "report": { … }
+}
+```
+
+`404 mesh not generated`, если генерации ещё не было.
+
+### GET `/v1/scenes/{id}/mesh.obj`
+
+`Content-Type: model/obj`. `404 mesh not generated`.
+
+### POST `/v1/scenes/{id}/to-scenario`
+
+Компиляция Scene → Scenario JSON (для `/v1/simulations`).  
+Ветка mesh пишет OBJ во временный файл, `mesh.uri` — абсолютный.  
+`400 scene validation failed`; `500 to-scenario failed`.
+
+---
+
+## WebSocket `/v1/events`
+
+### Клиент → сервер
+
+| op | Поля | Назначение |
+|----|------|------------|
+| `subscribe` | `jobId` (или `"*"`) | события job.* |
+| `subscribeScene` | `sceneId` | fan-out scene.* (ack `scene.subscribed`) |
+| `scene.patch` | `sceneId`, `ops[]` | дельты movers |
+
+Битые JSON-фреймы и неизвестные ops молча игнорируются. REST остаётся авторитетным.
+
+### scene.patch ops (v1)
+
+```json
+{
+  "op": "scene.patch",
+  "sceneId": "…",
+  "ops": [
+    { "op": "move", "entityType": "source", "id": "src-1", "position": [1, 1.5, 2] },
+    { "op": "setPower", "entityType": "source", "id": "src-1", "powerDb": 90 }
+  ]
+}
+```
+
+| op | Поля | Эффект |
 |----|------|--------|
-| `subscribe` | `{"op":"subscribe","jobId":"job-…"}` | события job (или `jobId:"*"` — все) |
-| `subscribeScene` | `{"op":"subscribeScene","sceneId":"scene-…"}` | события сцены; ack `scene.subscribed` |
-| `scene.patch` | `{"op":"scene.patch","sceneId":"…","ops":[…]}` | дельты movers |
+| `move` | `entityType`: `source`\|`receiver`, `id`, `position` | позиция |
+| `setPower` | `entityType`: `source`, `id`, `powerDb` | мощность |
 
-Неизвестные `op` и некорректные кадры молча отбрасываются.
+All-or-nothing на сообщение; один bump `sceneVersion`. Неизвестный op / id / поля → `scene.error`, сцена не тронута.
 
-### scene.patch ops
+### Сервер → клиент
 
-```json
-[
-  { "op": "move", "entityType": "source", "id": "src-1", "position": [1, 1.5, 2] },
-  { "op": "setPower", "entityType": "source", "id": "src-1", "powerDb": 85 }
-]
-```
-
-| Op | `entityType` | Поля | Ошибки |
-|----|--------------|------|--------|
-| `move` | `source` / `receiver` | `position: [x,y,z]` | неверный тип, кривой `position` |
-| `setPower` | `source` | `powerDb: number` | неверный тип, не число |
-
-Patch атомарен: одна невалидная op — отклонение всего patch. Ответ инициатору и fan-out подписчикам сцены (без инициатора):
-
-```json
-{ "event": "scene.patched", "sceneId": "scene-…", "sceneVersion": 4, "applied": 2 }
-{ "event": "scene.error", "sceneId": "scene-…", "detail": "move position must be a [x, y, z] number array" }
-```
-
-### События сервера
-
-| Событие | Поля |
-|---------|------|
-| `job.progress` | `jobId`, `fraction`, `stage` |
-| `job.succeeded` | `jobId`, `simulationId`, `summary` (metrics) |
+| event | payload |
+|-------|---------|
+| `scene.subscribed` | `sceneId` (ack подписки) |
+| `scene.patched` | `sceneId`, `sceneVersion`, `applied` |
+| `scene.error` | `detail` (+ fan-out) |
+| `job.progress` | `jobId`, `fraction` 0..1, `stage` |
+| `job.succeeded` | `jobId`, `simulationId`, `summary` |
 | `job.failed` | `jobId`, `error` |
 | `job.cancelled` | `jobId` |
-| `scene.subscribed` | `sceneId` (ack на `subscribeScene`) |
-| `scene.patched` | `sceneId`, `sceneVersion`, `applied` |
-| `scene.error` | `sceneId`, `detail` |
+| `simulation.reflection` | optional P3+: batched paths для live 3D |
 
-## Заметки
+`scene.patched` / `scene.error` приходят инициатору patch и fan-out подписчикам `subscribeScene` (инициатор исключён — без двойной доставки).
 
-- Хранение сцен и runs — **в памяти**: перезапуск `av-api` очищает историю.
-- CORS-заголовков нет — контракт desktop (Electron инжектит CORS сам).
-- `mesh.uri` в `POST /v1/simulations` резолвится относительно **CWD процесса** `av-api`.
+REST-polling `GET /v1/jobs/{id}` — fallback; WS — progressive enhancement.
+
+---
+
+## Примечания
+
+- Все id — uuid-lite / `run-…` / `job-…` / `meshjob-…`.
+- `sceneVersion` — uint64 везде (run record, paramsDigest, wire).
+- Планируется, но **не реализовано**: CRUD materials/rooms/sources/receivers, `POST /v1/rooms/import`, list/PATCH/DELETE scenarios, `GET /v1/scenarios/{id}/validate`.

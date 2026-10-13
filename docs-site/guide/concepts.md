@@ -1,6 +1,6 @@
 # Концепции
 
-Короткий словарь и модель данных: что такое Scenario и Scene, какие артефакты выдают engines и как читать метрики.
+Короткий словарь и модель данных: что такое Scenario и Scene, какие артефакты выдают engines и как читать метрики.
 
 ## Scenario vs Scene
 
@@ -10,20 +10,20 @@
 | Схема | `schemas/scenario.schema.json` | `schemas/scene.schema.json` |
 | Комната | `room`: `rect` или `mesh` | entities: `wall`, `solid_box`, `solid_extrude`, `void` |
 | API | `/v1/scenarios`, `/v1/simulations` | `/v1/scenes`, mesh, `to-scenario` |
-| Система координат | Y-up (`h` — высота) | Z-up (высота по Z) |
+| Система координат | Y-up (`h` — высота) | Z-up (высота по Z) |
 | Материалы | inline `materials[]` | inline `materials[]` |
 | Источники / приёмники | `sources[]`, `receivers[]` | `sources[]`, `receivers[]` |
 
-**Scenario** — единица работы расчёта: комната, материалы, источники, приёмники, `params`.  
-**Scene** — документ встроенного редактора: стены с проёмами, тела, void, mesh-настройки. Чтобы запустить расчёт, Scene компилируется в Scenario через `to-scenario` (или `av-cli` pipeline).
+**Scenario** — единица работы расчёта: комната, материалы, источники, приёмники, `params`.  
+**Scene** — документ встроенного редактора: стены с проёмами, тела, void, mesh-настройки. Чтобы запустить расчёт, Scene компилируется в Scenario через `to-scenario` (или `av-cli` pipeline).
 
-V0.2 не ломает `scenario.schema.json` — это параллельный документ.
+V0.2 не ломает `scenario.schema.json` — это параллельный документ.
 
 ## Комната
 
 ### Rect
 
-Прямоугольная комната `w × h × d` (метры) с материалами граней:
+Прямоугольная комната `w × h × d` (метры) с материалами граней:
 
 | Грань | Ключ |
 |-------|------|
@@ -70,16 +70,16 @@ V0.2 не ломает `scenario.schema.json` — это параллельны�
 
 | Поле | Смысл |
 |------|--------|
-| `absorption` | α(f) ∈ [0, 1] по октавным полосам — **энергетическое** поглощение |
-| `bandsHz` | полосы; если не заданы — берётся таблица сценария / default |
+| `absorption` | α(f) ∈ [0, 1] по октавным полосам — **энергетическое** поглощение |
+| `bandsHz` | полосы; если не заданы — берётся таблица сценария / default |
 | `scattering` | коэффициент рассеяния; используют RT-методы, ISM v1 игнорирует |
 
-## Источники и приёмники
+## Источники и приёмники
 
 **Источник:** `id`, `position`, `powerDb`, опционально `orientation` (yaw/pitch), `directivity` (omni / dipole / cardioid / custom + polar-кривые).  
-**Приёмник:** `id`, `position` — точка наблюдения.
+**Приёмник:** `id`, `position` — точка наблюдения.
 
-Мощность в `powerDb` — уровень в dB SPL @ 1 м (не электрические ватты). Подробнее — [Источники](/guide/sources).
+Мощность в `powerDb` — уровень в dB SPL @ 1 м (не электрические ватты). Подробнее — [Источники](/guide/sources).
 
 ## Параметры расчёта (`params`)
 
@@ -92,14 +92,14 @@ V0.2 не ломает `scenario.schema.json` — это параллельны�
 | `bandsHz` | полосы расчёта |
 | `speedOfSound` | м/с, default 343 |
 | `capturePaths` | сохранять полилинии лучей |
-| `airAbsorption` | поглощение в воздухе |
+| `airAbsorption` | поглощение в воздухе |
 | `signedIr` | IR со знаком (иначе energy envelope) |
-| `fieldGrid` | `{ enabled, nx, ny, nz }` — сетка пространственного поля |
+| `fieldGrid` | `{ enabled, nx, ny, nz }` — сетка пространственного поля |
 | `methodParams` | параметры конкретного engine (см. его `paramsSchema`) |
 
 ## Engines (методы расчёта)
 
-Engine — реализация метода за `IEngine`: `descriptor()`, `validate()`, `run()`. Регистрация — `REGISTER_ENGINE`.
+Engine — реализация метода за `IEngine`: `descriptor()`, `validate()`, `run()`. Регистрация — `REGISTER_ENGINE`.
 
 | id | Модель | Комната | Артефакты |
 |----|--------|---------|-----------|
@@ -108,7 +108,7 @@ Engine — реализация метода за `IEngine`: `descriptor()`, `va
 | `ray-tracing` | лучи + BVH | mesh | `metrics`, `ir`, `rays`, `field` |
 | `hybrid` | RT-проход, early/late split | mesh | `metrics`, `ir`, `rays`, `field` |
 
-Подробно — [Методы расчёта](/guide/engines).
+Подробно — [Методы расчёта](/guide/engines).
 
 ## Артефакты (Result)
 
@@ -117,9 +117,9 @@ Engine — реализация метода за `IEngine`: `descriptor()`, `va
 | Артефакт | Что это |
 |----------|---------|
 | `metrics` | RT60 (Schroeder / Sabine / Eyring), EDT, early reflections |
-| `ir` | импульсный отклик (`IrBuffer`); экспорт — WAV |
-| `field` | `SpatialField` — энергия на 3D-гриде |
-| `rays` | `paths[]` — полилинии лучей с амплитудой и порядком |
+| `ir` | импульсный отклик (`IrBuffer`); экспорт — WAV |
+| `field` | `SpatialField` — энергия на 3D-гриде |
+| `rays` | `paths[]` — полилинии лучей с амплитудой и порядком |
 | `findings` | опциональные флаги анализа |
 
 ### IR (Impulse Response)
@@ -128,7 +128,7 @@ Engine — реализация метода за `IEngine`: `descriptor()`, `va
 
 ### Поле (`field`)
 
-`nx, ny, nz`, `origin`, `cellSize`, `bandHz` (0 = broadband), линейные `values` с индексом `x + nx*(y + ny*z)`. Хранится в `unit: "energy"`; пересчёт в дБ — на границе API/UI.
+`nx, ny, nz`, `origin`, `cellSize`, `bandHz` (0 = broadband), линейные `values` с индексом `x + nx*(y + ny*z)`. Хранится в `unit: "energy"`; пересчёт в дБ — на границе API/UI.
 
 ### Лучи (`rays`)
 
@@ -140,17 +140,17 @@ Engine — реализация метода за `IEngine`: `descriptor()`, `va
 |---------|-------------|
 | **RT60 Schroeder** | backward integration, T30: линейный фит −5…−35 дБ |
 | **RT60 Sabine** | `T = 0.161 · V / (S · ᾱ)` |
-| **RT60 Eyring** | с поправкой на ln(1−ᾱ) |
+| **RT60 Eyring** | с поправкой на ln(1−ᾱ) |
 | **EDT** | Early Decay Time, фит 0 → −10 дБ |
-| **EarlyReflections** | top-K пиков в первые 80 мс: `t`, `amp`, `order` |
+| **EarlyReflections** | top-K пиков в первые 80 мс: `t`, `amp`, `order` |
 
 ## Bands (частотные полосы)
 
-Default — октавные: 125, 250, 500, 1000, 2000, 4000 Гц (`GET /v1/bands`). Расширение до 63 Гц / 8 кГц — через `bandsHz` в материале и params. Симуляция считает **по полосам**; линейная интерполяция — только для отображения.
+Default — октавные: 125, 250, 500, 1000, 2000, 4000 Гц (`GET /v1/bands`). Расширение до 63 Гц / 8 кГц идёт через `bandsHz` в материале и params. Симуляция считает **по полосам**; линейная интерполяция — только для отображения.
 
 ## Run / история запусков
 
-Один **run** = scenario + engine + params + Result. История — append-only список (новые сверху). UI может показать два run’а рядом глазами.
+Один **run** = scenario + engine + params + Result. История — append-only список (новые сверху). UI может показать два run’а визуально рядом.
 
 | Поле записи | Смысл |
 |-------------|--------|
@@ -169,4 +169,4 @@ Default — октавные: 125, 250, 500, 1000, 2000, 4000 Гц (`GET /v1/ban
 | **Interactive** | drag, правка сцены | WS `scene.patch` | Scene Store на бэке |
 | **Compute** | кнопка «Расчёт» | `POST /simulations` → job | полный Result |
 
-Интерактив **не** обязан пересчитывать акустику за 1 с. Тяжёлые методы — отдельной кнопкой, job может идти часы.
+Интерактив **не** обязан пересчитывать акустику за 1 с. Тяжёлые методы — отдельной кнопкой, job может идти часы.

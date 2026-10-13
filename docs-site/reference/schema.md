@@ -1,170 +1,246 @@
 # JSON Schema
 
-Формальные контракты — в каталоге `schemas/` репозитория. Сайт пересказывает поля; при расхождении побеждает файл схемы.
+Канонические контракты лежат в `schemas/` репозитория. C++-структуры зеркалят их; runtime-валидатора-библиотеки пока нет — форму покрывают юнит-тесты, смысл — `validate()` engine.
 
-| Файл | Документ | Кто читает |
-|------|----------|------------|
-| `scenario.schema.json` | Scenario — вход симуляции | `av-cli run`, `POST /v1/scenarios`, `POST /v1/simulations` |
-| `scene.schema.json` | Scene — документ редактора | `av-cli mesh`, `POST /v1/scenes` |
-| `engine-descriptor.schema.json` | EngineDescriptor | `GET /v1/engines`, `av-cli engines` |
-| `source-catalog.schema.json` | Каталог источников | `GET /v1/source-catalog` |
+| Файл | Документ |
+|------|----------|
+| `scenario.schema.json` | вход симуляции |
+| `scene.schema.json` | документ редактора (V0.2) |
+| `source-catalog.schema.json` | каталог источников |
+| `engine-descriptor.schema.json` | описание метода расчёта |
 
-Все документы несут `schemaVersion` (integer ≥ 1), где он предусмотрен схемой. Единицы — метры; конвертация только при импорте.
+---
 
 ## Scenario
 
-Обязательные ключи: `room`, `materials`, `params`.
+`title: Acoustic-Vision Scenario`
+
+| Поле | Тип | Обязательно | Смысл |
+|------|-----|-------------|--------|
+| `schemaVersion` | integer ≥ 1 | — | версия формата |
+| `name` | string | — | имя прогона/сценария |
+| `room` | object | да (по type) | комната |
+| `materials[]` | array | — | материалы |
+| `sources[]` | array | — | источники |
+| `receivers[]` | array | — | приёмники |
+| `params` | object | да (`engine`) | параметры расчёта |
+
+### room
+
+| Поле | Тип | Смысл |
+|------|-----|--------|
+| `type` | `rect` \| `mesh` | вид комнаты |
+| `size` | `{w,h,d}` > 0 | размеры rect |
+| `faces` | `floor`, `ceiling`, `x+`, `x-`, `z+`, `z-` → materialId | материалы граней |
+| `mesh` | object | mesh-комната |
+
+**mesh:**
+
+| Поле | Тип | Смысл |
+|------|-----|--------|
+| `uri` | string | OBJ/glTF; резолвинг — см. [FAQ](/faq) |
+| `unit` | `m`\|`mm`\|`cm`\|`in` | единицы файла (default m) |
+| `scale` | number > 0 | масштаб |
+| `materialOverrides` | map slot → materialId | материалы слотов |
+
+### materials[]
+
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `id` | string | да |
+| `name` | string | — |
+| `bandsHz[]` | number > 0 | — |
+| `absorption[]` | number [0,1] | да |
+| `scattering` | number [0,1] | — |
+
+### sources[]
+
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `id` | string | да |
+| `position` | `[x,y,z]` | да |
+| `powerDb` | number | — |
+| `orientation` | `{yawDeg?, pitchDeg?}` | — |
+| `directivity` | object | — |
+
+### receivers[]
+
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `id` | string | да |
+| `position` | `[x,y,z]` | да |
+
+### params
+
+| Поле | Тип | Ограничения |
+|------|-----|-------------|
+| `engine` | string | обязательно |
+| `maxReflectionOrder` | integer | 1…32 |
+| `sampleRate` | integer | ≥ 1000 |
+| `durationSec` | number | > 0 |
+| `bandsHz[]` | number > 0 | |
+| `speedOfSound` | number > 0 | |
+| `capturePaths` | boolean | |
+| `airAbsorption` | boolean | |
+| `signedIr` | boolean | |
+| `methodParams` | object | по paramsSchema engine |
+| `fieldGrid` | object | `enabled`, `nx/ny/nz` 1…64 |
+
+### directivity
+
+| Поле | Тип |
+|------|-----|
+| `type` | `omni`\|`dipole`\|`cardioid`\|`custom` |
+| `description` | string |
+| `horizontal` / `vertical` | polarCurve |
+
+### polarCurve
+
+| Поле | Тип | Форма |
+|------|-----|--------|
+| `freqsHz[]` | number > 0 | N полос |
+| `anglesDeg[]` | number | M углов |
+| `gainDb[][]` | number | N строк × M столбцов |
+
+---
+
+## Scene
+
+`title: Acoustic-Vision Scene`
+
+| Поле | Тип | Смысл |
+|------|-----|--------|
+| `schemaVersion` | integer | версия |
+| `id` | string | id документа |
+| `units` | `m` | только метры |
+| `materials[]` | material | как в scenario |
+| `entities[]` | union | wall / solid_box / solid_extrude / void / source / receiver |
+| `sources[]`, `receivers[]` | array | тоже есть в документе |
+| `meshSettings` | object | генерация mesh |
+
+### wall
+
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `type` | `"wall"` | да |
+| `id`, `start`, `end`, `height`, `thickness`, `faces` | | да |
+| `name`, `openings[]` | | — |
+
+`faces`: `inner`, `outer`, `side` → materialId.
+
+### opening
+
+| Поле | Смысл |
+|------|--------|
+| `type` | door / window |
+| `offset` | смещение вдоль стены |
+| `width`, `height` | размер |
+| `sill` | низ проёма от пола |
+
+### solid_box / solid_extrude / void
+
+| Тип | Поля |
+|-----|------|
+| `solid_box` | `origin`, `size`, `materialId` |
+| `solid_extrude` | `polygon` (XY), `height` (Z), `materialId` |
+| `void` | `origin`, `size` |
+
+### source / receiver (entities)
+
+```json
+{ "type": "source", "id": "src-1", "name": "…", "position": [x,y,z], "powerDb": 90 }
+{ "type": "receiver", "id": "rcv-1", "position": [x,y,z] }
+```
+
+Позиции в Scene — **Z-up**.
+
+### meshSettings
 
 ```json
 {
-  "schemaVersion": 1,
-  "name": "demo",
-  "room": {
-    "type": "rect",
-    "size": { "w": 6, "h": 2.8, "d": 4.5 },
-    "faces": {
-      "floor": "mat-carpet", "ceiling": "mat-plaster",
-      "x+": "mat-brick", "x-": "mat-brick", "z+": "mat-brick", "z-": "mat-brick"
-    }
+  "surface": {
+    "algorithm": "auto|earclip|advancing-front",
+    "targetEdge": 0.2,
+    "maxEdge": 0.5,
+    "quality": "draft|standard|fine"
   },
-  "materials": [
-    {
-      "id": "mat-carpet",
-      "name": "Carpet on concrete",
-      "bandsHz": [250, 500, 1000, 2000, 4000],
-      "absorption": [0.10, 0.25, 0.35, 0.40, 0.50],
-      "scattering": 0.1
-    }
-  ],
-  "sources": [
-    { "id": "src-1", "position": [1.2, 1.5, 1.0], "powerDb": 80.0 }
-  ],
-  "receivers": [
-    { "id": "rcv-1", "position": [3.0, 1.5, 2.0] }
-  ],
-  "params": {
-    "engine": "image-source",
-    "maxReflectionOrder": 3,
-    "sampleRate": 48000,
-    "durationSec": 1.5,
-    "speedOfSound": 343,
-    "capturePaths": false,
-    "signedIr": false,
-    "fieldGrid": { "enabled": false, "nx": 16, "ny": 8, "nz": 16 }
+  "volume": {
+    "algorithm": "tet|hex-box",
+    "targetSize": 0.15,
+    "enabled": false
   }
 }
 ```
 
-### room
+Пресеты quality: draft (0.5 / 1.0), standard (0.2 / 0.5), fine (0.08 / 0.2).
 
-| Поле | Смысл |
-|------|-------|
-| `type` | `rect` или `mesh` |
-| `size` | rect: `w`, `h`, `d` (> 0); **y = высота** |
-| `faces` | rect: материал грани — `floor`, `ceiling`, `x+`, `x-`, `z+`, `z-` |
-| `mesh` | mesh: `uri`, `unit` (`m`/`mm`/`cm`/`in`), `scale` (> 0), `materialOverrides` (имя зоны → materialId) |
+---
 
-### materials[]
+## Source catalog
 
-| Поле | Обязательно | Смысл |
-|------|-------------|-------|
-| `id` | да | ключ; на него ссылаются `faces` / `materialOverrides` |
-| `absorption` | да | α(f) ∈ [0, 1] по полосам, **энергетическое** поглощение |
-| `name` | нет | отображаемое имя |
-| `bandsHz` | нет | полосы материала; без них — таблица сценария / default |
-| `scattering` | нет | [0, 1]; RT-методы, ISM v1 игнорирует |
+`title: Acoustic-Vision Source Catalog`
 
-### sources[] / receivers[]
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `schemaVersion` | integer | — |
+| `disclaimer` | string | да (каталог) |
+| `sources[]` | entry | — |
 
-| Поле | Обязательно | Смысл |
-|------|-------------|-------|
-| `id` | да | уникальный ключ |
-| `position` | да | `[x, y, z]` |
-| `powerDb` | нет | dB SPL @ 1 м (см. [Источники](/guide/sources)) |
-| `orientation` | нет | `{ yawDeg, pitchDeg }` |
-| `directivity` | нет | `{ type, description?, horizontal?, vertical? }` |
+### entry
 
-`polarCurve` (`horizontal` / `vertical`): `freqsHz[]`, `anglesDeg[]`, `gainDb[][]` — по строке на частоту, длина строки = числу углов.
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `id`, `name` | string | да |
+| `manufacturer` | string | — |
+| `category` | string | — |
+| `powerDb` | number | да |
+| `spectrum` | `{bandsHz[], responseDb[]}` | — |
+| `directivity` | object | — |
+| `notes`, `sourceUrl` | string | — |
+| `disclaimer` | string | да |
 
-### params
+`spectrum.responseDb` — относительные сдвиги по полосам (АЧХ), dB.
 
-| Поле | Смысл |
-|------|-------|
-| `engine` | id метода (обязательно) |
-| `maxReflectionOrder` | 1–32, порядок отражений (ISM) |
-| `sampleRate` | Гц, ≥ 1000 (IR) |
-| `durationSec` | длительность IR (> 0) |
-| `bandsHz` | полосы расчёта |
-| `speedOfSound` | м/с (> 0), default 343 |
-| `capturePaths` | сохранять полилинии лучей |
-| `airAbsorption` | поглощение в воздухе |
-| `signedIr` | IR со знаком (иначе energy envelope) |
-| `methodParams` | параметры конкретного engine (см. его `paramsSchema`) |
-| `fieldGrid` | `{ enabled, nx, ny, nz }`; размерности 1–64 |
+---
 
-## Scene
+## Engine Descriptor
 
-Обязательные ключи: `schemaVersion`, `units`, `materials`, `entities`. `units` в v1 — только `"m"`.
+`title: Acoustic-Vision Engine Descriptor`
 
-```text
-Scene
-├── schemaVersion, id?, name?, units = "m"
-├── materials[]          # как в Scenario
-├── entities[]
-│   ├── wall             # стена: start, end, height, thickness, faces, openings[]
-│   ├── solid_box        # origin, size, materialId
-│   ├── solid_extrude    # polygon (XY) + height (Z)
-│   ├── void             # вычитаемый объём
-│   └── source / receiver
-├── sources[] / receivers[]   # раскладки source/receiver (как в Scenario)
-└── meshSettings         # surface + volume
-```
+| Поле | Тип | Обязательно |
+|------|-----|-------------|
+| `id` | string | да |
+| `name` | string | да |
+| `version` | string | да |
+| `caps` | object | да |
+| `paramsSchema` | object (JSON Schema) | — |
+| `artifacts[]` | enum subset | — |
 
-Отличия от Scenario: **Z-up** (высота по Z), геометрия — entities, mesh-настройки входят в документ. Компиляция `to-scenario` переводит Z-up → Y-up. Поля и примеры — [Редактор сцен](/guide/scene-editor).
+### caps
 
-### meshSettings
+| Поле | Тип | Смысл |
+|------|-----|--------|
+| `supportsRect` | boolean | rect-комнаты |
+| `supportsMesh` | boolean | mesh-комнаты |
+| `supportsRayPaths` | boolean | лучи в результате |
+| `supportsBands` | boolean | работа по полосам |
+| `maxOrder` | integer ≥ 0 | 0 = неприменимо |
 
-| Блок | Ключи |
-|------|-------|
-| `surface` | `algorithm` (`auto`/`earclip`/`advancing-front`), `targetEdge`, `maxEdge`, `quality` (`draft`/`standard`/`fine`) |
-| `volume` | `algorithm` (`tet`/`hex-box`), `targetSize`, `enabled` |
+### artifacts
 
-Явные `targetEdge` / `maxEdge` важнее пресета quality.
+Допустимые значения (unique): `ir`, `metrics`, `field`, `rays`, `findings`.
 
-## EngineDescriptor
+---
 
-Обязательные: `id`, `name`, `version`, `caps`.
+## Result (wire)
 
-| Поле | Смысл |
-|------|-------|
-| `caps` | `supportsRect`, `supportsMesh`, `supportsRayPaths`, `supportsBands`, `maxOrder` (≥ 0) |
-| `paramsSchema` | JSON Schema для `methodParams` |
-| `artifacts` | subset из `ir`, `metrics`, `field`, `rays`, `findings` (уникальные) |
+Не отдельный schema-файл, но контракт `resultToJson` / `GET /v1/jobs/{id}/result`:
 
-Пример — [Методы расчёта](/guide/engines).
+| Ключ | Появляется | Поля |
+|------|------------|------|
+| `metrics` | всегда у большинства engines | `rt60` {band: {schroederT30, sabine, eyring}}, `edt`, `earlyReflections[]` |
+| `ir` | engine с `ir` | `sampleRate`, `durationSec`, `channels`, `channelNames`, `bandsHz` |
+| `field` | engine с `field` + `fieldGrid` | `nx,ny,nz`, `origin`, `cellSize`, `bandHz`, `unit: "energy"`, `values` |
+| `rays` | engine с `rays` + `capturePaths` | `paths[]`: `{points, amplitude, order}` |
 
-## Source Catalog
-
-Обязательные: `disclaimer`, `sources`. У каждой карточки обязательны `id`, `name`, `powerDb`, `spectrum`, `directivity`, `disclaimer`.
-
-| Поле карточки | Смысл |
-|---------------|-------|
-| `manufacturer` | опционально |
-| `category` | свободная группировка |
-| `powerDb` | dB SPL @ 1 м на оси (примерные значения) |
-| `spectrum` | `bandsHz[]` + `responseDb[]` (относительные смещения) |
-| `directivity` | `type` + опциональные `horizontal` / `vertical` polarCurve |
-| `notes`, `sourceUrl` | опционально |
-
-Disclaimer на уровне каталога и на уровне карточки обязателен: данные — факт-ориентированные примеры, не проверенные вендорские спецификации.
-
-## Что не покрывают схемы
-
-Валидация «за схемой» живёт в коде `validate()` engines и `validateScene()`:
-
-- тип комнаты под конкретный engine (rect vs mesh);
-- нахождение source/receiver внутри комнаты (image-source);
-- согласованность длин `absorption` / `bandsHz`;
-- non-manifold mesh — warnings в mesh-report, не hard fail.
-
-Схемы валидируют **форму** документа; семантику — движки.
+Индекс поля: `x + nx*(y + ny*z)`.

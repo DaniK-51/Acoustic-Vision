@@ -4,10 +4,10 @@ Mesh-система V0.2: surface mesh из Scene, пресеты качеств
 
 ## Два уровня
 
-| Уровень | Назначение | Кто ест |
+| Уровень | Назначение | Потребители |
 |---------|------------|---------|
 | **Surface mesh** | треугольники границ | ray-tracing, hybrid, export OBJ/glTF |
-| **Volume mesh** | тетры/гексы в объёме | будущие FDTD/modal (v1 — каркас API) |
+| **Volume mesh** | тетры/гексы в объёме | будущие FDTD/modal (v1 — каркас API) |
 
 ## Surface mesh
 
@@ -15,11 +15,11 @@ Mesh-система V0.2: surface mesh из Scene, пресеты качеств
 
 **Алгоритмы v1:**
 
-1. **Explicit quads→triangles** — стены/боксы без CSG (быстро, стабильно, draft).
-2. **Clip + ear-clip** — стены с opening’ами, L-extrude (reliable fallback).
-3. **Advancing front / Delaunay** (v1.1) — если `targetEdge` сильно меньше размера комнаты.
+1. **Explicit quads→triangles** — стены/боксы без CSG (быстро, стабильно, draft).
+2. **Clip + ear-clip** — стены с opening’ами, L-extrude (reliable fallback).
+3. **Advancing front / Delaunay** (v1.1) — если `targetEdge` сильно меньше размера комнаты.
 
-**Выход:** `SurfaceMesh { positions, triangles, zones[] }` — тот же тип, что `av::Mesh`. Zone = material slot name. Пишется в OBJ/glTF.
+**Выход:** `SurfaceMesh { positions, triangles, zones[] }` — тот же тип, что `av::Mesh`. Zone = material slot name. Пишется в OBJ/glTF.
 
 ## Настройки (`meshSettings.surface`)
 
@@ -38,9 +38,9 @@ Mesh-система V0.2: surface mesh из Scene, пресеты качеств
 | standard | 0.2 | 0.5 | рабочий расчёт |
 | fine | 0.08 | 0.2 | плотная сетка |
 
-Явные `targetEdge` / `maxEdge` **важнее** пресета. Флаг CLI `--quality` — полный override: заменяет quality и **сбрасывает** custom `targetEdge`/`maxEdge`, чтобы применился пресет.
+Явные `targetEdge` / `maxEdge` **важнее** пресета. Флаг CLI `--quality` — полный override: заменяет quality и **сбрасывает** custom `targetEdge`/`maxEdge`, чтобы применился пресет.
 
-Поля `preserveCorners` / `weldEpsilon` — **не в v1**.
+Поля `preserveCorners` / `weldEpsilon` — **не в v1**.
 
 ## Volume mesh (каркас)
 
@@ -49,11 +49,11 @@ VolumeMeshSettings { algorithm: tet | hex-box, targetSize, enabled }
 generateVolumeMesh(scene) → { cells, nodes, zones }
 ```
 
-V0.2: API + schema + box-only `hex-box` stub (одна hex-ячейка на `SolidBox`; остальная геометрия и `algorithm: tet` — предупреждение и ноль ячеек). Полноценные tets — следующая итерация.
+V0.2: API + schema + box-only `hex-box` stub (одна hex-ячейка на `SolidBox`; остальная геометрия и `algorithm: tet` — предупреждение и ноль ячеек). Полноценные tets — следующая итерация.
 
 ## mesh-report
 
-После генерации — статистика и warnings:
+После генерации — статистика и warnings:
 
 ```json
 {
@@ -81,7 +81,7 @@ V0.2: API + schema + box-only `hex-box` stub (одна hex-ячейка на `So
 |------|--------|
 | `stats` | verts, tris, zones |
 | `bbox` | мировой ограничивающий бокс |
-| `warnings` | non-manifold и т.п. |
+| `warnings` | non-manifold и т. п. |
 | `settingsUsed` | фактически применённые настройки |
 | `entityTriangleCount` | trace: triangle → entityId (для клика в 3D) |
 
@@ -108,7 +108,7 @@ av-cli gen-mesh lroom -o l.obj --w 6 --d 4 --w2 3 --d2 3 --h 2.8 \
 | `--origin` | `x,y,z` |
 | `--scenario` | записать placeholder scenario рядом |
 
-Placeholder-scenario: mesh-room + три материала + один source/receiver + `ray-tracing` + `fieldGrid`. `mesh.uri` — путь OBJ **относительно scenario-файла**.
+Placeholder-scenario: mesh-room + три материала + один source/receiver + `ray-tracing` + `fieldGrid`. `mesh.uri` — путь OBJ **относительно scenario-файла**.
 
 ## CLI: `mesh`
 
@@ -123,9 +123,9 @@ av-cli mesh scene.json -o out.obj --report report.json --quality standard
 | `scene.json` | входной Scene |
 | `-o` | выходной OBJ (default: рядом со scene, расширение `.obj`) |
 | `--report` | записать mesh-report.json |
-| `--quality` | draft / standard / fine — **полный** density override |
+| `--quality` | draft / standard / fine — **полный** density override |
 
-Warnings пишутся в stderr; ошибки валидации Scene — в stderr, exit ≠ 0.
+Warnings пишутся в stderr; ошибки валидации Scene — в stderr, exit ≠ 0.
 
 ## API mesh
 
@@ -135,9 +135,9 @@ Warnings пишутся в stderr; ошибки валидации Scene — в 
 | GET | `/v1/scenes/{id}/mesh` | `{sceneId, sceneVersion, jobId, state, report}` (404 если не генерировали) |
 | GET | `/v1/scenes/{id}/mesh.obj` | `model/obj` (404 если mesh нет) |
 
-Mesh-джобы **не** в `/v1/jobs` — поллинг `GET /v1/scenes/{id}/mesh`.
+Mesh-джобы **не** в `/v1/jobs` — поллинг `GET /v1/scenes/{id}/mesh`.
 
-## Резолвинг mesh.uri в расчёте
+## Резолвинг mesh.uri в расчёте
 
 Когда Scenario ссылается на OBJ/glTF:
 
@@ -146,11 +146,11 @@ Mesh-джобы **не** в `/v1/jobs` — поллинг `GET /v1/scenes/{id}/m
 | `av-cli run` | каталог scenario-файла |
 | `av-api` (`POST /v1/simulations`) | **CWD процесса** |
 
-Поэтому API запускают из корня репозитория (как в GUI-демо), либо пишут абсолютный `uri`. Ошибка загрузки — `400 mesh load failed` до старта job.
+Поэтому API запускают из корня репозитория (как в GUI-демо), либо пишут абсолютный `uri`. Ошибка загрузки — `400 mesh load failed` до старта job.
 
 ## Ограничения v1
 
 - CSG-lite, не полный boolean.
-- Volume mesh — stub.
+- Volume mesh — stub.
 - Нет `preserveCorners` / `weldEpsilon`.
-- Плохие mesh из DCC — warnings в mesh-report, не hard fail.
+- Плохие mesh из DCC — warnings в mesh-report, не hard fail.

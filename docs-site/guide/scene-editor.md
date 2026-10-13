@@ -1,13 +1,13 @@
 # Редактор сцен (V0.2)
 
-Встроенный редактор описывает геометрию помещения как **Scene** — параллельный к Scenario документ (`schemas/scene.schema.json`). Из Scene получают surface mesh и компилируют Scenario для расчёта.
+Встроенный редактор описывает геометрию помещения как **Scene** — параллельный к Scenario документ (`schemas/scene.schema.json`). Из Scene получают surface mesh и компилируют Scenario для расчёта.
 
 ## Зачем отдельный Scenario
 
 Сегодня сценарий часто приходит «извне»: rect-JSON или OBJ/glTF. Редактор даёт:
 
-- стены/плоскости со свойствами и проёмами;
-- тела (solid) и вычитаемые объёмы (void);
+- стены/плоскости со свойствами и проёмами;
+- тела (solid) и вычитаемые объёмы (void);
 - mesh-настройки под алгоритмы;
 - compile Scene → Scenario для `/v1/simulations`.
 
@@ -28,11 +28,11 @@ Scene
 └── meshSettings         # глобальные + per-entity overrides
 ```
 
-**Единицы:** только метры (`units: "m"`). Конвертация — только при импорте.
+**Единицы:** только метры (`units: "m"`). Конвертация — только при импорте.
 
-## Стены и проёмы
+## Стены и проёмы
 
-**Wall / Slab** — главный примитив:
+**Wall / Slab** — главный примитив:
 
 | Поле | Смысл |
 |------|--------|
@@ -41,7 +41,7 @@ Scene
 | `start` / `end` | отрезок в 3D (основание стены) |
 | `height` | высота стены |
 | `faces` | `inner` / `outer` / `side` → materialId |
-| `openings[]` | двери/окна в плоскости стены |
+| `openings[]` | двери/окна в плоскости стены |
 
 Пример:
 
@@ -68,7 +68,7 @@ Scene
 
 | Поле | Смысл |
 |------|--------|
-| `type` | `door` / `window` (в схеме) |
+| `type` | `door` / `window` (в схеме) |
 | `offset` | смещение вдоль стены от `start` |
 | `width`, `height` | размер проёма |
 | `sill` | высота подоконника / низа проёма от пола |
@@ -79,18 +79,18 @@ Scene
 |-----|------|------------|
 | `solid_box` | `origin`, `size`, `materialId` | объёмный бокс (мебель, плита пола/потолка) |
 | `solid_extrude` | `polygon` (XY) + `height` (Z) | L-стена, ниша |
-| `void` | `origin`, `size` | вычитаемый объём (проём в теле) |
+| `void` | `origin`, `size` | вычитаемый объём (проём в теле) |
 
-Все сущности имеют `transform` (пока origin + axis-aligned; rotation — позже), `visible`, `locked`, `tags`.
+Все сущности имеют `transform` (пока origin + axis-aligned; rotation — позже), `visible`, `locked`, `tags`.
 
 ## Z-up vs Y-up
 
 | Документ | Вверх | Почему |
 |----------|-------|--------|
 | **Scene** (редактор) | **Z** | классический CAD/DCC, extrude идёт по Z |
-| **Scenario** (симуляция) | **Y** | `room.size.h` — высота; так же в Three.js / GUI viewport |
+| **Scenario** (симуляция) | **Y** | `room.size.h` — высота; так же в Three.js / GUI viewport |
 
-Компиляция `to-scenario` переводит Z-up → Y-up автоматически. Если пишете Scenario руками — помните: `position: [x, y, z]` с **y = высота**.
+Компиляция `to-scenario` переводит Z-up → Y-up автоматически. Если пишете Scenario руками — помните: `position: [x, y, z]` с **y = высота**.
 
 ## Mesh-настройки
 
@@ -118,7 +118,7 @@ Scene
 | standard | 0.2 | 0.5 |
 | fine | 0.08 | 0.2 |
 
-Явные `targetEdge` / `maxEdge` важнее пресета. Подробнее — [Mesh](/guide/mesh).
+Явные `targetEdge` / `maxEdge` важнее пресета. Подробнее — [Mesh](/guide/mesh).
 
 ## to-scenario (компиляция)
 
@@ -127,9 +127,9 @@ Scene
 - **rect**, если 4 стены без проёмов + 2 SolidBox-плиты пол/потолок (Z-up → Y-up);
 - иначе **mesh** + `ray-tracing` (surface mesh пишется во временный OBJ, uri абсолютный).
 
-Материалы и sources/receivers копируются как есть. `meshSettings` в Scenario не попадают — это вход генератора.
+Материалы и sources/receivers копируются как есть. `meshSettings` в Scenario не попадают — это вход генератора.
 
-Floor/ceiling в v1 — `solid_box`-плиты, отдельного типа нет.
+Floor/ceiling в v1 — `solid_box`-плиты, отдельного типа нет.
 
 ## API редактора
 
@@ -138,12 +138,12 @@ Floor/ceiling в v1 — `solid_box`-плиты, отдельного типа н
 | POST | `/v1/scenes` | создать Scene → `sceneId`, `sceneVersion` |
 | GET | `/v1/scenes/{id}` | чтение документа |
 | PUT / PATCH | `/v1/scenes/{id}` | **замена всего документа** (v1); mesh сбрасывается |
-| POST | `/v1/scenes/{id}/mesh` | генерация mesh (`?sync=1` — сразу) |
+| POST | `/v1/scenes/{id}/mesh` | генерация mesh (`?sync=1` — сразу) |
 | GET | `/v1/scenes/{id}/mesh` | состояние job + mesh-report |
 | GET | `/v1/scenes/{id}/mesh.obj` | скачать OBJ |
 | POST | `/v1/scenes/{id}/to-scenario` | compile → Scenario JSON |
 
-Mesh-джобы **не** живут в `/v1/jobs` (там только симуляции) — поллите `GET /v1/scenes/{id}/mesh`.
+Mesh-джобы **не** живут в `/v1/jobs` (там только симуляции) — поллите `GET /v1/scenes/{id}/mesh`.
 
 ## CLI
 
@@ -161,9 +161,9 @@ av-cli mesh scene.json -o out.obj --report report.json --quality standard
 | meshSettings + presets | панель «Mesh: algorithm, targetEdge, quality» |
 | generate + mesh-report | wireframe-preview, warnings |
 | entity→triangle trace | клик по грани → entity |
-| to-scenario | кнопка «В расчёт» |
+| to-scenario | кнопка «В расчёт» |
 
-Планируемая раскладка: слева дерево entities + материалы; в центре 3D; справа инспектор; снизу mesh-генератор.
+Планируемая раскладка: слева дерево entities + материалы; в центре 3D; справа инспектор; снизу mesh-генератор.
 
 ## Не в V0.2
 

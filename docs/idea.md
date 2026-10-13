@@ -1,6 +1,6 @@
 # Acoustic-Vision — идея продукта
 
-**Стадия:** P0–P3 backend реализован (engines, mesh, field, runs, catalog, scene.patch). GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); полный редактор помещений (V0.2) — в работе / по запросу. Контракты — [`engines.md`](engines.md); модули и API — [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+**Стадия:** P0–P3 backend + V0.2 core редактора сцен/mesh реализованы (engines, mesh, field, runs, catalog, scene.patch, `/v1/scenes`, `av-cli mesh`). GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); полный 3D-DCC и dynamic DLL — по запросу. Контракты — [`engines.md`](engines.md); модули и API — [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ## 1. Видение (согласовано)
 
@@ -137,7 +137,7 @@ JSON-документ (`schemas/scenario.schema.json`):
 
 Один **run** = scenario + engine + params + Result. История — список runs по сцене (без сложного Study/diff в v1). UI может показать два run’а рядом глазами.
 
-Запись run (P2e): `id` = **`runId`** (`run-…`, уникальный ключ истории), `jobId` — handle для артефактов (`/v1/jobs/{jobId}/…`), engine, scenarioName, sceneVersion (может отсутствовать), submittedAt/finishedAt, state, paramsDigest (engine + ключевые sim-параметры). `GET /v1/runs/{id}` принимает **либо `runId`, либо `jobId`**. Все терминальные job'ы (включая failed/cancelled) попадают в историю.
+Запись run (P2e): `id` = **`runId`** (`run-…`, уникальный ключ истории), `jobId` — handle для артефактов (`/v1/jobs/{jobId}/…`), engine, scenarioName, sceneVersion (может отсутствовать), submittedAt/finishedAt, state, paramsDigest (engine + ключевые sim-параметры). `GET /v1/runs/{id}` принимает **либо `runId`, либо `jobId`**. Все терминальные job’ы (включая failed/cancelled) попадают в историю.
 
 ## 6. API (контракт для GUI)
 
@@ -150,7 +150,7 @@ JSON-документ (`schemas/scenario.schema.json`):
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | GET | `/v1/health` | статус, версия |
-| GET | `/v1/engines` | descriptor'ы методов (caps + paramsSchema + artifacts) |
+| GET | `/v1/engines` | descriptor’ы методов (caps + paramsSchema + artifacts) |
 | GET | `/v1/bands` | сетка частот |
 | GET | `/v1/source-catalog` | built-in каталог приборов (мощность, АЧХ, directivity) |
 | POST/GET | `/v1/scenarios`, `/v1/scenarios/{id}` | сохранить/прочитать сцену → `sceneId`, `sceneVersion` |
@@ -184,8 +184,9 @@ WS: `scene.patch` / `scene.patched` / `scene.error` · `job.progress` · `job.su
 | **P1** | av-api REST/WS, jobs, runs history, schemas | **done** — контракт `/v1` заморожен |
 | **P2** | OBJ/glTF, mesh, RayTracing, hybrid, paths, **spatial field** | **done** — glTF считается; поле на гриде |
 | **P3 backend** | source catalog, Scene Store, `scene.patch` | **done** |
+| **V0.2 core** | Scene model (wall/solid/void), `av-cli mesh`, `/v1/scenes`, to-scenario | **done** — см. [`plan-v0.2.md`](plan-v0.2.md) |
 | **P2.5** | Dynamic plugin SDK (C ABI) | **только по запросу** |
-| **P3 GUI** | Electron+Vue+Three.js | прототип **есть** (`gui/`: GUI1–4 + V0.1.1); редактор помещений (V0.2) — **в работе / по запросу** |
+| **P3 GUI** | Electron+Vue+Three.js | прототип **есть** (`gui/`: GUI1–4 + V0.1.1); GUI-слайсы редактора (V0.2) — **по запросу** |
 | **P4** | Research-алгоритмы, сравнение runs | **later** — research engine подключён без правок GUI |
 | **P5** | Полноценный 3D-редактор (DCC-фичи) | **later** — сложная геометрия без внешних редакторов |
 
