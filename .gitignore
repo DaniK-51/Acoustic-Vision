@@ -36,3 +36,7 @@ gui/src/components/ScenarioLoader.vue
 gui/src/components/SceneOutline.vue
 gui/src/components/ViewportStub.vue
 gui/src/store.ts
+
+# UI verification leftovers
+gui/r1-ui.png
+gui/scripts/

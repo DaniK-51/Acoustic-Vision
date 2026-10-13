@@ -2,7 +2,7 @@
 
 Open-source инструмент акустического анализа помещений: 3D-сцена → источники → алгоритмы → поле звука, отражения, артефакты.
 
-**Стадия: P0–P3 backend готов** (engines, mesh, field, runs, catalog, scene.patch, REST/WS). GUI — следующий этап. Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` (~167 tests).
+**Стадия: P0–P3 backend готов** (engines, mesh, field, runs, catalog, scene.patch, REST/WS). GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1: gizmo, материалы, catalog); полный редактор помещений (V0.2) и dynamic DLL — по явному запросу. Сборка: CMake presets `linux-debug` / `windows-msvc-x64-*`; `ctest` (~216 tests).
 
 ## Видение
 
@@ -17,7 +17,7 @@ Open-source инструмент акустического анализа по�
 | Замеры | Не делаем (без mic/phone pipeline) |
 | Алгоритмы | Engine определяет артефакты: IR / field / rays / findings |
 | Сравнение | История запусков (runs) |
-| Ядро | C++ engines + combinator, REST/WS |
+| Ядро | C++ engines (+ combinator позже), REST/WS |
 
 | Документ | Содержание |
 |----------|------------|
@@ -33,7 +33,7 @@ Open-source инструмент акустического анализа по�
 |---------|--------|
 | Ядро отделено от UI | C++ считает, GUI — Electron+Vue+Three.js, REST/WS |
 | Методы — плагины | Новый алгоритм не трогает API, GUI и чужие движки |
-| Один контракт результата | Любой engine → IR + metrics + field (+ paths) |
+| Один контракт результата | Любой engine → Result (metrics / IR / field / rays — по caps engine) |
 | Interactive first | WS-дельты сцены; тяжёлый расчёт — job |
 | Open research | Алгоритмы из работ; golden-бенчи |
 | Без measurement | Не наш pipeline |
@@ -71,7 +71,7 @@ Windows: `cmake --preset windows-msvc-x64-release` (vcpkg).
 ## Структура репозитория
 
 ```
-libs/core     # geometry, materials, metrics, Engine API (+ ray-tracing, hybrid)
+libs/core     # geometry, materials, metrics, scene model, Engine API (+ ray-tracing, hybrid)
 libs/io       # OBJ/glTF, scenario JSON, WAV, field.json, source catalog
 libs/sim      # JobManager
 apps/cli      # av-cli
@@ -91,8 +91,9 @@ gui/          # Electron + Vue + Three.js (P3, REST/WS /v1)
 | **P2** | mesh OBJ+glTF, Ray Tracing, hybrid, field | done |
 | **P3 backend** | source catalog, Scene Store, scene.patch | done |
 | **P2.5** | Dynamic plugin SDK (C ABI) | only on request |
-| **P3 GUI** | Electron + Vue + Three.js | only on request |
+| **P3 GUI** | Electron + Vue + Three.js | прототип GUI1–4 + V0.1.1 (`gui/`); редактор помещений — in progress / on request |
 | **P4** | Research-алгоритмы | later |
+| **P5** | Полноценный 3D-редактор (DCC) | later |
 
 ## Стек
 

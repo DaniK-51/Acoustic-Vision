@@ -16,7 +16,7 @@ Companion docs: [`docs/idea.md`](docs/idea.md) · [`docs/engines.md`](docs/engin
 ```
 Acoustic-Vision/
 ├── CMakeLists.txt                 # superbuild, options: AV_BUILD_API, AV_BUILD_TESTS
-├── CMakePresets.json              # windows-msvc-x64-debug/release
+├── CMakePresets.json              # windows-msvc-x64-debug/release, linux-debug
 ├── vcpkg.json                     # manifest deps
 ├── ARCHITECTURE.md                # this document
 ├── README.md                      # product overview
@@ -24,14 +24,11 @@ Acoustic-Vision/
 ├── schemas/                       # JSON Schemas, single source of truth for API + GUI
 │   ├── scenario.schema.json       # present
 │   ├── engine-descriptor.schema.json  # present
-│   ├── material.schema.json       # planned (P0)
-│   ├── simulation-result.schema.json  # planned (P0)
-│   └── job.schema.json            # planned (P1)
-├── cmake/                         # helpers, warnings, sanitizers
-├── engines/                       # calculation methods + _template (see docs/engines.md)
-│   ├── sabine_eyring/
-│   ├── image_source/
-│   └── _template/
+│   ├── source-catalog.schema.json # present
+│   └── scene.schema.json          # present (V0.2 parallel scene document)
+├── cmake/                         # helpers, warnings
+├── engines/                       # optional home for future standalone engines
+│                                  # (in-repo engines live in libs/core/src/acoustics)
 ├── libs/
 │   ├── core/                      # av_core — pure computation, no HTTP, no file IO deps
 │   │   ├── include/av/
@@ -42,7 +39,7 @@ Acoustic-Vision/
 │   │   │   ├── scenario/          # Scenario, Source, Receiver, SimParams
 │   │   │   └── units.hpp
 │   │   └── src/...
-│   ├── io/                        # av_io — OBJ/glTF import, WAV/CSV export, scenario JSON
+│   ├── io/                        # av_io — OBJ/glTF import, WAV export, scenario JSON, metrics/field JSON
 │   │   ├── include/av/io/
 │   │   └── src/
 │   └── sim/                       # av_sim — job queue, progress, cancellation
@@ -53,10 +50,9 @@ Acoustic-Vision/
 │   └── api/                       # av-api: REST + WebSocket server (Crow)
 ├── tests/
 │   ├── unit/                      # GoogleTest, per-module
-│   ├── integration/               # API round-trips (spawn server or in-process)
-│   └── fixtures/                  # analytic rooms, golden IR/metrics, sample OBJ/glTF
-├── tools/                         # scripts (schema validation, golden regen)
-└── gui/                           # P3 placeholder — empty, README stub only
+│   ├── integration/               # api_smoke + cli_field_smoke (Python, via ctest)
+│   └── fixtures/                  # analytic rooms, sample OBJ/glTF
+└── gui/                           # Electron + Vue + Three.js (REST/WS /v1 only)
     └── README.md
 ```
 
@@ -84,7 +80,10 @@ Acoustic-Vision/
 - `Source { id, position, orientation, powerDb, spectrum (АЧХ), directivity, catalogRef? }`.
 - **Custom** source defined inline in scenario.
 - **Built-in catalog** (`GET /v1/source-catalog`): real-world devices as fact-based cards (power, frequency response, polar pattern). No measurement pipeline.
-- Catalog is data-only; engines consume the resolved Source model.
+  - Format: `schemas/source-catalog.schema.json`; data file `data/source_catalog.json` (loaded as `source_catalog.json` beside the executable, `AV_SOURCE_CATALOG` overrides; missing file → empty list + warning, endpoint still 200).
+  - Card `powerDb` = rated/typical max SPL in dB SPL @ 1 m (not electrical watts); `spectrum.responseDb` = relative level offsets per band. Every card and the catalog carry a required `disclaimer` (example specs, not verified vendor data).
+  - Response shape: `{ "disclaimer": string, "sources": [entry…] }`.
+- Catalog is data-only and read-only for now; engines consume the resolved Source model (GUI maps a card onto Source fields later).
 
 ### acoustics engines (Engine API)
 Extensibility goal: **new method = one module + registration** — no edits to API, GUI, or other engines. Full guide: `docs/engines.md`.
@@ -134,12 +133,12 @@ public:
 
 Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory by id + descriptor list).
 
-| Engine | Role (v1+) | Notes |
-|---|---|---|
-| `sabine-eyring` | analytic RT60 from V, S, ᾱ(f) | no IR; metrics only; instant |
-| `image-source` | IR for **rectangular** rooms, order N | classical mirror-source; per-band IR |
-| `ray-tracing` | IR + ray paths for **mesh** rooms | P2; same `IEngine` |
-| `hybrid` | one RT pass, early/late split | P2; full IR on mesh |
+| Engine | Role (v1+) | Artifacts | Notes |
+|---|---|---|---|
+| `sabine-eyring` | analytic RT60 from V, S, ᾱ(f) for **rectangular** rooms | `metrics` | no IR; instant |
+| `image-source` | IR for **rectangular** rooms, order N | `metrics`, `ir` | classical mirror-source; broadband IR |
+| `ray-tracing` | IR + ray paths for **mesh** rooms | `metrics`, `ir`, `rays`, `field` | P2; same `IEngine` |
+| `hybrid` | one RT pass, early/late split on mesh | `metrics`, `ir`, `rays`, `field` | P2; full IR on mesh |
 
 `EngineRegistry` selects by `simParams.engine` + room type; API returns `400` if engine/capability mismatch (e.g. IMS + mesh).
 
@@ -159,8 +158,8 @@ Registration: `REGISTER_ENGINE(ImageSourceEngine)` → `EngineRegistry` (factory
 - `IrBuffer`: multi-channel broadband (one channel per source×receiver pair, name `srcId:rcvId`); `sampleRate`. Per-band IR packs (if ever) are separate IrBuffers — not 3D in one buffer (ADR).
 - `RT60`: Schroeder backward integration + linear fit of −5…−35 dB (T30); also report Sabine & Eyring analytic.
 - `EDT`: 0 → −10 dB fit.
-- `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, (optional) path polyline for GUI.
-- `IrExport`: WAV (float32 PCM) + CSV (time, amplitude per channel/band).
+- `EarlyReflections`: top-K peaks in first 80 ms with time, amplitude, order (no path polyline — traced polylines live in `RayPaths`).
+- `IrExport`: WAV (float32 PCM) + metrics/field JSON.
 - `SpatialField`: energy density on a regular cubic 3D grid — `nx,ny,nz`, `origin`, `cellSize`, `bandHz` (0 = broadband), linear `values` (index `x + nx*(y + ny*z)`); for heat-maps and “where sound is strong”. Stored linear (`unit: "energy"`); dB conversion happens at the API/UI edge. Engines advertise the `field` artifact and fill it when `params.fieldGrid` is set (ray-tracing deposits ray energy into the cells); others leave `Result.field` empty.
 
 ### runs (history)
@@ -193,8 +192,8 @@ GUI renders only advertised kinds. Long jobs (minutes–hours, GPU/CPU) are firs
 
 ### IO
 - Import: **OBJ** (tinyobjloader), **glTF/GLB** (tinygltf) → `Mesh` + material slots. Dispatch by extension; glTF importer reads triangle primitives (POSITION required). Scale/unit flag (`meters` default, `mm/cm/in` convert on import).
-- Export: scenario JSON (nlohmann), IR WAV/CSV, metrics JSON.
-- Scenario (de)serialization ↔ `schemas/*.schema.json` — validate in tests and at API boundary.
+- Export: scenario JSON (nlohmann), IR WAV, metrics JSON, field JSON.
+- Scenario (de)serialization ↔ `schemas/*.schema.json` — structs mirror the schemas; shape covered by unit tests (no runtime schema-validator library yet).
 
 ### job / orchestration (`av_sim`)
 - `JobManager`: thread pool (N = hw−1), `JobId`, states `queued → running → succeeded | failed | cancelled`.
@@ -216,30 +215,36 @@ In-memory store v1 (std::unordered_map + mutex). Persistence (SQLite) is a later
 
 ### REST endpoints
 
+Implemented (P0–P3 backend):
+
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/health` | liveness, version |
-| GET | `/v1/engines` | `EngineDescriptor` list (id, caps, paramsSchema) |
-| GET/POST | `/v1/materials` | list / create material |
-| GET/PATCH/DELETE | `/v1/materials/{id}` | read / update / delete |
-| GET/POST | `/v1/rooms` | list / create room (inline mesh or import ref) |
-| GET/PATCH/DELETE | `/v1/rooms/{id}` | read / update / delete |
-| POST | `/v1/rooms/import` | multipart: OBJ/glTF (+ options: scale, unit, name) → room |
-| GET/POST | `/v1/sources` | list / create source (pos, orientation, power, АЧХ, directivity) |
+| GET | `/v1/engines` | `EngineDescriptor` list (id, caps, paramsSchema, artifacts) |
+| GET | `/v1/bands` | frequency band convention in use |
 | GET | `/v1/source-catalog` | built-in device catalog (specs as-is, no warranty) |
 | GET | `/v1/runs` | run history (newest first; `?engine=` filter) |
 | GET | `/v1/runs/{id}` | one run + links to result/ir/field (accepts `runId` or `jobId`; links key on `jobId`) |
-| GET/POST | `/v1/receivers` | list / create receiver (pos) |
-| GET/POST | `/v1/scenarios` | list / create full scenario (refs + params) |
-| GET/PATCH/DELETE | `/v1/scenarios/{id}` | read / update / delete |
-| GET | `/v1/scenarios/{id}/validate` | dry-run: mesh/material/engine checks |
-| POST | `/v1/simulations` | run scenario → `{jobId}` (async) or `?sync=1` → result |
-| GET | `/v1/jobs/{id}/result` | result summary + metrics (P1: jobId = simulation handle) |
-| GET | `/v1/jobs/{id}/ir.wav` | IR artifact (WAV binary) |
-| GET | `/v1/jobs/{id}/field` | spatial field grid JSON |
+| POST | `/v1/scenarios` | store scenario → `{sceneId, sceneVersion}` |
+| GET | `/v1/scenarios/{id}` | stored scenario snapshot |
+| POST | `/v1/simulations` | run inline scenario or `{"sceneId"}` → `{jobId}` (async) or `?sync=1` → result |
 | GET | `/v1/jobs/{id}` | job status/progress/error |
 | POST | `/v1/jobs/{id}/cancel` | request cancellation |
-| GET | `/v1/bands` | frequency band convention in use |
+| GET | `/v1/jobs/{id}/result` | result JSON (metrics / ir summary / field / rays by caps) |
+| GET | `/v1/jobs/{id}/ir.wav` | IR artifact (WAV binary) |
+| GET | `/v1/jobs/{id}/field` | spatial field grid JSON |
+
+Planned (GUI/editor phase — not implemented yet):
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST/PATCH/DELETE | `/v1/materials`, `/v1/materials/{id}` | material CRUD (today materials live inline in the scenario) |
+| GET/POST/PATCH/DELETE | `/v1/rooms`, `/v1/rooms/{id}` | room CRUD (today the room is inline in the scenario) |
+| POST | `/v1/rooms/import` | multipart: OBJ/glTF (+ options: scale, unit, name) → room |
+| GET/POST | `/v1/sources`, `/v1/receivers` | entity CRUD (today sources/receivers are inline) |
+| GET | `/v1/scenarios` | list stored scenarios |
+| PATCH/DELETE | `/v1/scenarios/{id}` | update / delete stored scenario |
+| GET | `/v1/scenarios/{id}/validate` | dry-run: mesh/material/engine checks |
 
 **Two modes:**
 - **Interactive** — WS `scene.patch` / `scene.patched` for mover deltas; backend Scene Store is source of truth. No promise of full acoustic recompute per drag.
@@ -304,9 +309,9 @@ REST polling (`GET /jobs/{id}`) is the fallback; WS is progressive enhancement.
 }
 ```
 
-Result sketch: `{ simulationId, jobId, metrics: { rt60: { "500": { schroederT30, sabine, eyring }, ... }, edt: {...}, earlyReflections: [{ t, amp, order, path? }] }, ir: { sampleRate, durationSec, channels, urls }, field: { nx, ny, nz, origin, cellSize, bandHz, unit, values } }`.
+Result sketch (`GET /v1/jobs/{id}/result` = `resultToJson`): `{ metrics: { rt60: { "500": { schroederT30, sabine, eyring }, ... }, edt: {...}, earlyReflections: [{ t, amp, order }] }, ir: { sampleRate, durationSec, channels, channelNames, bandsHz }, field: { nx, ny, nz, origin, cellSize, bandHz, unit, values }, rays: { paths: [{ points, amplitude, order }] } }` — `ir` / `field` / `rays` keys appear only when the engine produced those artifacts.
 
-Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; API validates against schema before enqueue.
+Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; the API accepts what the scenario parser accepts (validate() of the engine is the real gate).
 
 ---
 
@@ -315,20 +320,19 @@ Canonical schemas live in `schemas/`; C++ structs mirror them 1:1; API validates
 | Concern | Choice | Why |
 |---|---|---|
 | Build | **CMake ≥ 3.24** + `CMakePresets.json` | MSVC/VS2022 native, Ninja optional |
-| Packages | **vcpkg manifest** (`vcpkg.json`) | official Windows story, reproducible |
+| Packages | **vcpkg manifest** (`vcpkg.json`) + FetchContent (Crow/Asio/tinyobjloader/tinygltf) | reproducible; Windows-first |
 | Lang | **C++20** | designated init, `span`, `ranges` sparingly |
-| Linear algebra | **Eigen 3.4** (header-only) | vectors/transforms; no heavy dep |
+| Linear algebra | in-tree `Vec3` / `Aabb` (no Eigen) | tiny surface, no heavy dep |
 | JSON | **nlohmann/json** | ubiquitous, easy |
-| HTTP + WS | **Crow** | one lib, REST + WebSocket, Asio-based, simple routing |
+| HTTP + WS | **Crow + standalone Asio** (`CROW_USE_BOOST=OFF`) | one lib, REST + WebSocket, no Boost |
 | OBJ | **tinyobjloader** | single-purpose, widely used |
 | glTF | **tinygltf** (+ stb) | covers GLB, materials |
-| WAV | **dr_wav** (or 50-line custom float32 writer) | trivial IR export |
-| CLI | **CLI11** | clean, header-friendly |
+| WAV | custom float32 PCM writer (`av_io::writeWav` / `encodeWav`) | trivial IR export, no dr_wav |
+| CLI | hand-rolled argv parsing (`av-cli`) | no CLI11 needed for 2 subcommands |
 | Tests | **GoogleTest** | industry default |
-| Schema check | **nlohmann-json-schema-validator** (optional P1) | validate at API edge |
 | GUI (P3) | **Electron + Vue + Three.js** | voted stack; not a C++ concern |
 
-Avoid Boost.Beast (build weight) and FDTD/GNU Octave-style deps. P0 engines are CPU; GPU engines are allowed later (job queue is long-run ready).
+Avoid Boost (Crow runs on standalone Asio), FDTD/GNU Octave-style deps. P0 engines are CPU; GPU engines are allowed later (job queue is long-run ready).
 
 ---
 
@@ -345,24 +349,26 @@ ctest --preset windows-msvc-x64-release
   - RT60: Sabine `T = 0.161 V / (S ᾱ)` and Eyring against hand-computed rooms; empty-room vs highly-absorbing bounds.
   - ISM: single-bounce delay/amplitude analytic check; image count for order N; rectangular shoebox vs Sabine trend (RT60 from IR ≈ analytic within tolerance); reciprocity source↔receiver.
   - Metrics: synthetic IR with known exponential decay → RT60 recovered; EDT on synthetic early-late split.
-  - IO: OBJ/glTF round-trip vertex counts; scenario JSON golden files.
-- **Integration**: spin `av-api` in-process (`AV_BUILD_API`) or subprocess; REST CRUD + one full simulation job + WS `job.succeeded` receipt.
-- **Golden tests**: `tests/fixtures/golden/*.json` regenerated only via `tools/regen_goldens` and reviewed.
-- **CI (later)**: GitHub Actions `windows-latest` matrix, ctest + schema validation.
+  - IO: OBJ/glTF round-trip vertex counts; scenario JSON round-trip.
+- **Integration**: `tests/integration/api_smoke.py` and `cli_field_smoke.py` (spawn `av-api` / `av-cli` as subprocesses; ctest targets `api_smoke`, `cli_field_smoke`).
+- **CI (later)**: GitHub Actions `windows-latest` matrix, ctest.
 
 ---
 
 ## 7. Phased roadmap
 
-| Phase | Scope | Exit criteria |
+| Phase | Scope | Status / exit criteria |
 |---|---|---|
-| **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV/CSV export, `av-cli` | unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
-| **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store, schema validation | integration tests green; Electron-ready contract frozen (`schemas/`) |
-| **P2** Import + mesh rooms | OBJ/glTF, Mesh, BVH, `ray-tracing`, `hybrid` (one RT pass early/late), paths, field | glTF room runs; metrics sane vs shoebox |
-| **P3** Electron+Vue+Three.js GUI | Базовый 3D-редактор, gizmos, каталог, `scene.patch`, кнопка «Расчёт», history | drag → WS-дельта; run → job |
-| **P4** Research + catalog | External algorithms as engines, richer source cards | research engine без правок GUI |
+| **P0** Core lib + CLI | `av_core` geometry/materials, Sabine/Eyring, ISM rect rooms, metrics, scenario JSON, WAV export, `av-cli` | **done** — unit tests green; shoebox IR RT60 ≈ analytic; CLI produces IR+metrics from JSON |
+| **P1** API server | Crow app, resources above, async jobs, WS progress, in-memory store | **done** — integration smoke green; `schemas/` contract frozen |
+| **P2** Import + mesh rooms | OBJ/glTF, Mesh, BVH, `ray-tracing`, `hybrid` (one RT pass early/late), paths, field | **done** — glTF room runs; metrics sane vs shoebox |
+| **P3 backend** | source catalog, Scene Store, `scene.patch` | **done** |
+| **P2.5** Dynamic plugin SDK | C ABI `av_engine_api_v1`, `LoadLibrary` | **only on request** |
+| **P3 GUI** | Electron+Vue+Three.js | prototype **delivered** (`gui/` slices GUI1–4 + V0.1.1: runs, metrics, field heat-map, rays, gizmo, materials, catalog); room editor (V0.2) **in progress / on request** |
+| **P4** Research + catalog | External algorithms as engines, richer source cards | **later** |
+| **P5** Full DCC editor | complex geometry without external editors | **later** |
 
-GUI outline only (P3): main process talks REST; renderer subscribes WS; room editor = box/extrude primitives + OBJ/glTF upload; source panel = custom + catalog; heat-map field + reflection rays; run history. No custom mesh sculpting in v1.5.
+GUI today (prototype): main process talks REST; renderer subscribes WS; source panel = custom + catalog; heat-map field + reflection rays; run history. Room editor (box/extrude primitives + OBJ/glTF upload, gizmos) is the on-request part. No custom mesh sculpting in v1.5.
 
 ---
 
@@ -393,7 +399,7 @@ GUI outline only (P3): main process talks REST; renderer subscribes WS; room edi
 - No distributed compute (single-node job queue first). GPU engines OK when an engine needs them.
 - No auth/multi-tenant (localhost tool).
 - No heavy Study/diff — run history only.
-- No GUI implementation in P0–P2 (contract only).
+- No GUI-to-core linking (GUI talks REST/WS only); GUI slices themselves live in `gui/`.
 
 ---
 
@@ -403,6 +409,6 @@ GUI outline only (P3): main process talks REST; renderer subscribes WS; room edi
 2. `av_core`: `Vec3`, `Room` rect, `Material`/bands, scenario structs + JSON.
 3. `SabineEyringEngine` + metrics from analytic → tests.
 4. `ImageSourceEngine` + `IrBuffer` + RT60/EDT from IR → golden shoebox test.
-5. `av_io`: scenario JSON r/w, WAV/CSV export.
+5. `av_io`: scenario JSON r/w, WAV export.
 6. `av-cli` end-to-end.
 7. Freeze `schemas/`; start P1 (`av_sim` jobs, then `av-api`).

@@ -9,7 +9,7 @@
 
 ## Стадия проекта
 
-**P0–P3 backend delivered**: engines (sabine-eyring, image-source, ray-tracing, hybrid), mesh OBJ+glTF, SpatialField, runs history (runId ≠ jobId), source catalog, Scene Store + WS scene.patch, av-cli, av-api. **GUI (Electron) и dynamic DLL (P2.5) — только по явному запросу.** ctest baseline ≈185.
+**P0–P3 backend delivered**: engines (sabine-eyring, image-source, ray-tracing, hybrid), mesh OBJ+glTF, SpatialField, runs history (runId ≠ jobId), source catalog, Scene Store + WS scene.patch, av-cli, av-api. GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); **редактор помещений (V0.2) и dynamic DLL (P2.5) — только по явному запросу.** ctest baseline ≈216.
 
 Реализация идёт по `ARCHITECTURE.md` и `docs/engines.md`. GUI (P3) и dynamic DLL (P2.5) — не трогать. Новый scope — сначала в docs, потом код.
 
@@ -50,7 +50,7 @@
 
 ```
 libs/core     # av_core — расчёты, Engine API (без HTTP/файлов)
-libs/io       # av_io — scenario JSON, экспорт WAV/CSV
+libs/io       # av_io — scenario JSON, экспорт WAV / metrics+field JSON
 libs/sim      # av_sim — job/run orchestration (в P0 — sync runner достаточно)
 apps/cli      # av-cli
 apps/api      # av-api (P1)
@@ -87,7 +87,7 @@ schemas/      # JSON Schema
 3. **Engine API**: `IEngine`, `EngineDescriptor` (+ caps, paramsSchema), `ValidateResult`, `CancelToken`, `EngineRegistry`, `REGISTER_ENGINE`, `Result`.
 4. `SabineEyringEngine` + unit-тесты (аналитика vs hand calc).
 5. `ImageSourceEngine` + `IrBuffer` + metrics (Schroeder T30, EDT, early reflections) + golden shoebox.
-6. `av_io`: scenario JSON r/w, WAV/CSV export.
+6. `av_io`: scenario JSON r/w, WAV export.
 7. `av-cli`: `run <scenario.json>`, `engines`.
 8. Заморозить `schemas/` (scenario + engine-descriptor) → можно P1.
 
