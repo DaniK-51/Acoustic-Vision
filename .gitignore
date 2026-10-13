@@ -40,3 +40,8 @@ gui/src/store.ts
 # UI verification leftovers
 gui/r1-ui.png
 gui/scripts/
+
+# Docs site
+docs-site/node_modules/
+docs-site/.vitepress/cache/
+docs-site/.vitepress/dist/
