@@ -319,6 +319,28 @@ TEST(HybridEngine, CancelledTokenReturnsEmpty) {
   EXPECT_FALSE(result.rays.has_value());
 }
 
+TEST(HybridEngine, SeedIsDeterministic) {
+  av::linkBuiltinEngines();
+  auto engine = av::EngineRegistry::instance().create("hybrid");
+  ASSERT_NE(engine, nullptr);
+
+  av::Scenario scenario = makeMeshScenario(6.0, 3.0, 4.0, 0.25);
+  const av::Result a =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  const av::Result b =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(a.ir.has_value());
+  ASSERT_TRUE(b.ir.has_value());
+  ASSERT_EQ(a.ir->samples.size(), b.ir->samples.size());
+  EXPECT_EQ(a.ir->samples, b.ir->samples);
+
+  scenario.params.methodParams["seed"] = 7;
+  const av::Result c =
+      engine->run(scenario, scenario.params, av::CancelToken{}, nullptr);
+  ASSERT_TRUE(c.ir.has_value());
+  EXPECT_NE(a.ir->samples, c.ir->samples);
+}
+
 TEST(HybridEngine, RegistryListsHybrid) {
   av::linkBuiltinEngines();
   const auto descriptors = av::EngineRegistry::instance().descriptors();

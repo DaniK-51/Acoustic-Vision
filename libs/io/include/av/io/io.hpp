@@ -37,6 +37,27 @@ void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
 [[nodiscard]] Scene loadScene(const std::filesystem::path& path);
 void saveScene(const Scene& scene, const std::filesystem::path& path);
 
+// to-scenario compile (docs/room-editor-mesh.md §4). Copies materials and
+// sources/receivers; meshSettings are a mesher input and never land in the
+// scenario. Two shapes:
+// - Rect — the scene is a closed box: exactly 4 axis-aligned walls (equal
+//   height, baselines on z=0 forming one rectangle, no openings) plus a floor
+//   and a ceiling SolidBox slab whose XY footprint is exactly that rectangle
+//   and which touch z=0 / z=height. Wall faces.inner map to x+/x-/z+/z- by
+//   wall position; the slab materialIds map to floor/ceiling. Scene is Z-up
+//   while RectRoom is Y-up (h along +y): positions are swapped (x,z,y) and
+//   translated so the room min corner is the origin. Default engine
+//   "image-source".
+// - Mesh — anything else: generateSurfaceMesh over the scene is written to
+//   `meshPath` (required here; throws std::runtime_error when empty) and
+//   referenced via room.mesh.uri (unit "m", identity materialOverrides —
+//   mesh slots already carry scene material ids). Positions keep the scene
+//   Z-up frame. Default engine "ray-tracing".
+// The generated mesh is not attached to the returned scenario; disk loading
+// stays at the CLI/API boundary via fillLoadedMesh.
+[[nodiscard]] Scenario scenarioFromScene(
+    const Scene& scene, const std::filesystem::path& meshPath = {});
+
 // mesh-report.json (docs/room-editor-mesh.md §3.4, slice R8): generation
 // stats for the GUI/API bottom sheet and CLI --report.
 struct MeshReport {
@@ -70,6 +91,9 @@ void writeMeshReport(const std::filesystem::path& path,
 // generateBoxMesh shapes). Units meters; triangle winding is preserved as-is
 // (box.obj convention). Throws std::runtime_error on IO failure.
 void saveObj(const std::filesystem::path& path, const Mesh& mesh);
+
+// Same container as saveObj, encoded to memory (API mesh.obj endpoint).
+[[nodiscard]] std::string encodeObj(const Mesh& mesh);
 
 // Wavefront OBJ import. `unit` is "m"|"mm"|"cm"|"in"; vertex positions are
 // converted to meters at import (SI convention, AGENTS.md decision 14) and

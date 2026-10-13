@@ -16,7 +16,8 @@ namespace av {
 struct SurfaceMeshResult {
   // Triangle mesh over all geometry entities. materialSlots hold *material
   // ids* (faces.inner / faces.outer / faces.side / materialId), so RT can
-  // resolve them through materialIdForSlot without a zone table.
+  // resolve them through materialIdForSlot without a zone table. Empty ids
+  // fall back to faceKind names ("inner" / "outer" / "side" / "solid").
   Mesh mesh;
   // entity id -> triangles contributed by that entity (picking / mesh-report).
   // Entities that produce no geometry are absent.
@@ -38,10 +39,16 @@ struct SurfaceMeshResult {
 //   several openings). Reveal/jamb faces are not generated and the four slab
 //   caps are not cut, so a sill=0 door leaves the bottom cap running under
 //   the hole — each opening emits a warning.
+// - Void: box subtracted from wall faces it overlaps (v1 CSG-lite). The
+//   void's (s, z) footprint on a wall face becomes a simple hole on that
+//   face, but only where the void actually *penetrates* the slab: a face is
+//   cut when the void reaches that face through the thickness (inner and/or
+//   outer). Zero-volume contact does not cut. Same grid split as openings;
+//   no reveal faces. Solids (SolidBox / SolidExtrude) ignore voids — the
+//   limitation is reported once per void in warnings.
 // - SolidBox: 8 vertices / 12 triangles, all faces use materialId.
 // - SolidExtrude: prism over the XY polygon (base z=0, height along +Z);
 //   side quads + ear-clipped caps. CW polygons are reversed to CCW first.
-// - Void: no geometry, one warning — wall openings live inline on walls.
 // - Source / Receiver: no geometry.
 //
 // Winding / normals (mesh.hpp "into the room / toward the air" where

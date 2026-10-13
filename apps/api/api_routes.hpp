@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "api_support.hpp"
+#include "editor_scene_store.hpp"
 #include "runs_store.hpp"
 #include "scene_store.hpp"
 
@@ -64,10 +65,13 @@ void registerSimulationRoutes(crow::SimpleApp& app, JobManager& jobs,
 void registerRunRoutes(crow::SimpleApp& app, JobManager& jobs, RunsStore& runs);
 void registerJobRoutes(crow::SimpleApp& app, JobManager& jobs);
 void registerEventRoutes(crow::SimpleApp& app, EventHub& hub, SceneStore& scenes);
+// Room-editor Scene documents (/v1/scenes + mesh + to-scenario), slice R9.
+void registerEditorSceneRoutes(crow::SimpleApp& app, EditorSceneStore& scenes);
 
 // Single entry for main: registers every /v1 route.
 void registerRoutes(crow::SimpleApp& app, JobManager& jobs, EventHub& hub,
                     RunsStore& runs, SceneStore& scenes,
+                    EditorSceneStore& editorScenes,
                     const SourceCatalog& sourceCatalog);
 
 }  // namespace av::api

@@ -94,19 +94,92 @@ bool makeWallFrame(const Wall& wall, WallFrame& frame, std::string& error) {
   return true;
 }
 
-bool insideAnyOpening(double s, double z, const std::vector<WallOpening>& openings) {
-  for (const WallOpening& opening : openings) {
-    if (s > opening.offset - kEps &&
-        s < opening.offset + opening.width + kEps && z > opening.sill - kEps &&
-        z < opening.sill + opening.height + kEps) {
+// Rectangular hole in the wall face plane (s along the baseline, z up).
+struct FaceHole {
+  double s0 = 0.0;
+  double s1 = 0.0;
+  double z0 = 0.0;
+  double z1 = 0.0;
+};
+
+bool insideAnyHole(double s, double z, const std::vector<FaceHole>& holes) {
+  for (const FaceHole& hole : holes) {
+    if (s > hole.s0 - kEps && s < hole.s1 + kEps && z > hole.z0 - kEps &&
+        z < hole.z1 + kEps) {
       return true;
     }
   }
   return false;
 }
 
-void addWall(const Wall& wall, EntityMesher& mesher,
-             std::vector<std::string>& warnings) {
+// Exact inverse of frame.at() for any baseline: right is always horizontal
+// (right.z == 0), so z closes on d.z once s is known.
+void wallLocal(const WallFrame& frame, const Vec3& p, double& s, double& z,
+               double& t) {
+  const Vec3 d = p - frame.origin;
+  t = dot(d, frame.right);
+  const double dirZ = frame.dir.z;
+  z = (d.z - dirZ * dot(d, frame.dir)) / (1.0 - dirZ * dirZ);
+  s = dot(d, frame.dir) - z * dirZ;
+}
+
+// v1 void CSG (architect decision): a void box that *penetrates* the slab and
+// overlaps the face rectangle cuts a simple hole in the inner and/or outer
+// face — whichever face the void reaches in thickness. Touching (zero-volume
+// contact) is not a cut; a void floating entirely inside the thickness cannot
+// be represented and is left to the caller's "not subtracted" note.
+bool voidCutsWall(const Void& voidEntity, const WallFrame& frame,
+                  FaceHole& hole, bool& cutInner, bool& cutOuter) {
+  const Vec3 lo{std::min(voidEntity.origin.x, voidEntity.origin.x + voidEntity.size.x),
+                std::min(voidEntity.origin.y, voidEntity.origin.y + voidEntity.size.y),
+                std::min(voidEntity.origin.z, voidEntity.origin.z + voidEntity.size.z)};
+  const Vec3 hi{std::max(voidEntity.origin.x, voidEntity.origin.x + voidEntity.size.x),
+                std::max(voidEntity.origin.y, voidEntity.origin.y + voidEntity.size.y),
+                std::max(voidEntity.origin.z, voidEntity.origin.z + voidEntity.size.z)};
+  double sMin = 0.0;
+  double sMax = 0.0;
+  double zMin = 0.0;
+  double zMax = 0.0;
+  double tMin = 0.0;
+  double tMax = 0.0;
+  for (int i = 0; i < 8; ++i) {
+    const Vec3 corner{(i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y,
+                      (i & 4) ? hi.z : lo.z};
+    double s = 0.0;
+    double z = 0.0;
+    double t = 0.0;
+    wallLocal(frame, corner, s, z, t);
+    if (i == 0) {
+      sMin = sMax = s;
+      zMin = zMax = z;
+      tMin = tMax = t;
+    } else {
+      sMin = std::min(sMin, s);
+      sMax = std::max(sMax, s);
+      zMin = std::min(zMin, z);
+      zMax = std::max(zMax, z);
+      tMin = std::min(tMin, t);
+      tMax = std::max(tMax, t);
+    }
+  }
+  hole.s0 = std::max(0.0, sMin);
+  hole.s1 = std::min(frame.length, sMax);
+  hole.z0 = std::max(0.0, zMin);
+  hole.z1 = std::min(frame.height, zMax);
+  const bool rectOk = hole.s1 - hole.s0 > kEps && hole.z1 - hole.z0 > kEps;
+  // Penetration, not mere contact: the void must claim slab volume.
+  const bool penetrates = tMin < frame.thickness - kEps && tMax > kEps;
+  cutInner = rectOk && penetrates && tMin < kEps;
+  cutOuter = rectOk && penetrates && tMax > frame.thickness - kEps;
+  return cutInner || cutOuter;
+}
+
+std::string zoneName(const std::string& materialId, const char* faceKind) {
+  return materialId.empty() ? std::string(faceKind) : materialId;
+}
+
+void addWall(const Wall& wall, const std::vector<const Void*>& voids,
+             EntityMesher& mesher, std::vector<std::string>& warnings) {
   WallFrame frame;
   std::string error;
   if (!makeWallFrame(wall, frame, error)) {
@@ -114,7 +187,9 @@ void addWall(const Wall& wall, EntityMesher& mesher,
     return;
   }
 
-  std::vector<WallOpening> openings;
+  // Openings cut both big faces; a void cuts only the face(s) it reaches
+  // through the thickness, so hole lists are per face (side 0 = inner).
+  std::vector<FaceHole> holes[2];
   for (std::size_t i = 0; i < wall.openings.size(); ++i) {
     const WallOpening& opening = wall.openings[i];
     if (!(opening.width > 0.0) || !(opening.height > 0.0)) {
@@ -129,32 +204,55 @@ void addWall(const Wall& wall, EntityMesher& mesher,
                          std::to_string(i) + "]: skipped (outside the slab)");
       continue;
     }
-    openings.push_back(opening);
+    const FaceHole hole{opening.offset, opening.offset + opening.width,
+                        opening.sill, opening.sill + opening.height};
+    holes[0].push_back(hole);
+    holes[1].push_back(hole);
     warnings.push_back("wall " + quoted(wall.id) + " openings[" +
                        std::to_string(i) +
                        "]: simple hole without reveal faces (v1)");
+  }
+
+  for (const Void* voidEntity : voids) {
+    FaceHole hole;
+    bool cutInner = false;
+    bool cutOuter = false;
+    if (!voidCutsWall(*voidEntity, frame, hole, cutInner, cutOuter)) {
+      continue;
+    }
+    if (cutInner) {
+      holes[0].push_back(hole);
+    }
+    if (cutOuter) {
+      holes[1].push_back(hole);
+    }
+    warnings.push_back("wall " + quoted(wall.id) + ": void " +
+                       quoted(voidEntity->id) +
+                       " cut as a simple hole without reveal faces (v1)");
   }
 
   // Grid split of the inner/outer faces around the holes. Breaks strictly
   // inside the face rectangle become grid lines; 0 / L / 0 / H are implicit.
   std::vector<double> sBreaks{0.0, frame.length};
   std::vector<double> zBreaks{0.0, frame.height};
-  for (const WallOpening& opening : openings) {
-    if (opening.offset > kEps && opening.offset < frame.length - kEps) {
-      sBreaks.push_back(opening.offset);
+  const auto addBreaks = [&](const std::vector<FaceHole>& faceHoles) {
+    for (const FaceHole& hole : faceHoles) {
+      if (hole.s0 > kEps && hole.s0 < frame.length - kEps) {
+        sBreaks.push_back(hole.s0);
+      }
+      if (hole.s1 > kEps && hole.s1 < frame.length - kEps) {
+        sBreaks.push_back(hole.s1);
+      }
+      if (hole.z0 > kEps && hole.z0 < frame.height - kEps) {
+        zBreaks.push_back(hole.z0);
+      }
+      if (hole.z1 > kEps && hole.z1 < frame.height - kEps) {
+        zBreaks.push_back(hole.z1);
+      }
     }
-    const double sEnd = opening.offset + opening.width;
-    if (sEnd > kEps && sEnd < frame.length - kEps) {
-      sBreaks.push_back(sEnd);
-    }
-    if (opening.sill > kEps && opening.sill < frame.height - kEps) {
-      zBreaks.push_back(opening.sill);
-    }
-    const double zEnd = opening.sill + opening.height;
-    if (zEnd > kEps && zEnd < frame.height - kEps) {
-      zBreaks.push_back(zEnd);
-    }
-  }
+  };
+  addBreaks(holes[0]);
+  addBreaks(holes[1]);
   std::sort(sBreaks.begin(), sBreaks.end());
   std::sort(zBreaks.begin(), zBreaks.end());
   sBreaks.erase(std::unique(sBreaks.begin(), sBreaks.end(),
@@ -184,40 +282,43 @@ void addWall(const Wall& wall, EntityMesher& mesher,
     return corners[index];
   };
 
+  const std::string innerZone = zoneName(wall.faces.inner, "inner");
+  const std::string outerZone = zoneName(wall.faces.outer, "outer");
   for (std::size_t iz = 0; iz + 1 < nZ; ++iz) {
     for (std::size_t is = 0; is + 1 < nS; ++is) {
       const double sMid = 0.5 * (sBreaks[is] + sBreaks[is + 1]);
       const double zMid = 0.5 * (zBreaks[iz] + zBreaks[iz + 1]);
-      if (insideAnyOpening(sMid, zMid, openings)) {
-        continue;
-      }
       // Inner face: normal -right (left of start->end) = into the room for a
       // CCW wall loop.
-      mesher.quad(corner(is, iz, 0), corner(is, iz + 1, 0),
-                  corner(is + 1, iz + 1, 0), corner(is + 1, iz, 0),
-                  wall.faces.inner);
+      if (!insideAnyHole(sMid, zMid, holes[0])) {
+        mesher.quad(corner(is, iz, 0), corner(is, iz + 1, 0),
+                    corner(is + 1, iz + 1, 0), corner(is + 1, iz, 0),
+                    innerZone);
+      }
       // Outer face: normal +right.
-      mesher.quad(corner(is, iz, 1), corner(is + 1, iz, 1),
-                  corner(is + 1, iz + 1, 1), corner(is, iz + 1, 1),
-                  wall.faces.outer);
+      if (!insideAnyHole(sMid, zMid, holes[1])) {
+        mesher.quad(corner(is, iz, 1), corner(is + 1, iz, 1),
+                    corner(is + 1, iz + 1, 1), corner(is, iz + 1, 1),
+                    outerZone);
+      }
     }
   }
 
   // Slab caps (openings do not cut them in v1 — see header).
+  const std::string sideZone = zoneName(wall.faces.side, "side");
   // Bottom: normal -up.
   mesher.quad(corner(0, 0, 0), corner(nS - 1, 0, 0), corner(nS - 1, 0, 1),
-              corner(0, 0, 1), wall.faces.side);
+              corner(0, 0, 1), sideZone);
   // Top: normal +up.
   mesher.quad(corner(0, nZ - 1, 0), corner(0, nZ - 1, 1),
               corner(nS - 1, nZ - 1, 1), corner(nS - 1, nZ - 1, 0),
-              wall.faces.side);
+              sideZone);
   // Start cap: normal -dir.
   mesher.quad(corner(0, 0, 0), corner(0, 0, 1), corner(0, nZ - 1, 1),
-              corner(0, nZ - 1, 0), wall.faces.side);
+              corner(0, nZ - 1, 0), sideZone);
   // End cap: normal +dir.
   mesher.quad(corner(nS - 1, 0, 0), corner(nS - 1, nZ - 1, 0),
-              corner(nS - 1, nZ - 1, 1), corner(nS - 1, 0, 1),
-              wall.faces.side);
+              corner(nS - 1, nZ - 1, 1), corner(nS - 1, 0, 1), sideZone);
 }
 
 // ---------------------------------------------------------------------------
@@ -247,12 +348,13 @@ void addSolidBox(const SolidBox& box, EntityMesher& mesher,
   const std::uint32_t v7 = mesher.vertex({x0, y1, z1});
 
   // Outward windings (toward the air around the solid).
-  mesher.quad(v0, v3, v2, v1, box.materialId);  // -z
-  mesher.quad(v4, v5, v6, v7, box.materialId);  // +z
-  mesher.quad(v0, v4, v7, v3, box.materialId);  // -x
-  mesher.quad(v1, v2, v6, v5, box.materialId);  // +x
-  mesher.quad(v0, v1, v5, v4, box.materialId);  // -y
-  mesher.quad(v3, v7, v6, v2, box.materialId);  // +y
+  const std::string zone = zoneName(box.materialId, "solid");
+  mesher.quad(v0, v3, v2, v1, zone);  // -z
+  mesher.quad(v4, v5, v6, v7, zone);  // +z
+  mesher.quad(v0, v4, v7, v3, zone);  // -x
+  mesher.quad(v1, v2, v6, v5, zone);  // +x
+  mesher.quad(v0, v1, v5, v4, zone);  // -y
+  mesher.quad(v3, v7, v6, v2, zone);  // +y
 }
 
 // ---------------------------------------------------------------------------
@@ -387,21 +489,20 @@ void addSolidExtrude(const SolidExtrude& extrude, EntityMesher& mesher,
     bottom[i] = mesher.vertex({polygon[i].x, polygon[i].y, 0.0});
     top[i] = mesher.vertex({polygon[i].x, polygon[i].y, extrude.height});
   }
+  const std::string zone = zoneName(extrude.materialId, "solid");
   for (std::size_t i = 0; i < n; ++i) {
     const std::size_t j = (i + 1) % n;
     // CCW base ring -> side normals point out of the prism.
-    mesher.quad(bottom[i], bottom[j], top[j], top[i], extrude.materialId);
+    mesher.quad(bottom[i], bottom[j], top[j], top[i], zone);
   }
   for (const std::array<int, 3>& tri : caps) {
     // Ear winding is CCW seen from +Z: top keeps it, bottom reverses it.
     mesher.triangle(bottom[static_cast<std::size_t>(tri[0])],
                     bottom[static_cast<std::size_t>(tri[2])],
-                    bottom[static_cast<std::size_t>(tri[1])],
-                    extrude.materialId);
+                    bottom[static_cast<std::size_t>(tri[1])], zone);
     mesher.triangle(top[static_cast<std::size_t>(tri[0])],
                     top[static_cast<std::size_t>(tri[1])],
-                    top[static_cast<std::size_t>(tri[2])],
-                    extrude.materialId);
+                    top[static_cast<std::size_t>(tri[2])], zone);
   }
 }
 
@@ -417,22 +518,29 @@ SurfaceMeshResult generateSurfaceMesh(const Scene& scene,
         "v1; using explicit quads / earclip");
   }
 
+  // Voids apply to every wall regardless of entity order, so collect them
+  // first. v1 subtracts voids from wall faces only — solids ignore voids
+  // (architect decision; limitation is reported once per void below).
+  std::vector<const Void*> voids;
+  for (const SceneEntity& entity : scene.entities) {
+    if (const auto* voidEntity = std::get_if<Void>(&entity)) {
+      voids.push_back(voidEntity);
+    }
+  }
+
   MeshBuilder builder;
   EntityMesher mesher(builder);
   for (const SceneEntity& entity : scene.entities) {
     const std::string& id = entityId(entity);
     const std::size_t before = mesher.count();
     if (const auto* wall = std::get_if<Wall>(&entity)) {
-      addWall(*wall, mesher, result.warnings);
+      addWall(*wall, voids, mesher, result.warnings);
     } else if (const auto* box = std::get_if<SolidBox>(&entity)) {
       addSolidBox(*box, mesher, result.warnings);
     } else if (const auto* extrude = std::get_if<SolidExtrude>(&entity)) {
       addSolidExtrude(*extrude, mesher, result.warnings);
     } else if (std::holds_alternative<Void>(entity)) {
-      result.warnings.push_back(
-          "void " + quoted(id) +
-          ": not subtracted in v1 (openings live inline on walls); mesh unchanged");
-      continue;
+      continue;  // subtracted from walls above; no geometry of its own
     } else {
       continue;  // source / receiver: no geometry
     }
@@ -440,6 +548,14 @@ SurfaceMeshResult generateSurfaceMesh(const Scene& scene,
     if (added > 0) {
       result.entityTriangleCount[id] = added;
     }
+  }
+
+  // One limitation note per void (they never contribute triangles of their
+  // own, so the count map stays keyed by geometry entity).
+  for (const Void* voidEntity : voids) {
+    result.warnings.push_back(
+        "void " + quoted(voidEntity->id) +
+        ": v1 subtracts wall faces only; solids ignore voids (limitation)");
   }
 
   result.mesh = builder.build();

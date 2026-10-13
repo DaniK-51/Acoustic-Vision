@@ -22,6 +22,7 @@ FetchContent_MakeAvailable(tinygltf)
 add_library(av_io
   src/scenario_json.cpp
   src/scene_json.cpp
+  src/scene_to_scenario.cpp
   src/source_catalog.cpp
   src/wav.cpp
   src/metrics_json.cpp

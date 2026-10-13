@@ -2,17 +2,14 @@
 
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 
 namespace av {
 
-void saveObj(const std::filesystem::path& path, const Mesh& mesh) {
-  std::ofstream out(path);
-  if (!out) {
-    throw std::runtime_error("cannot write OBJ file: " + path.string());
-  }
-
+std::string encodeObj(const Mesh& mesh) {
+  std::ostringstream out;
   out << "# Acoustic-Vision generated mesh (units meters)\n";
   out << "# Winding matches tests/fixtures/box.obj.\n";
   out << std::setprecision(15);
@@ -48,7 +45,15 @@ void saveObj(const std::filesystem::path& path, const Mesh& mesh) {
     out << "f " << (triangle.v0 + 1) << ' ' << (triangle.v1 + 1) << ' '
         << (triangle.v2 + 1) << '\n';
   }
+  return out.str();
+}
 
+void saveObj(const std::filesystem::path& path, const Mesh& mesh) {
+  std::ofstream out(path);
+  if (!out) {
+    throw std::runtime_error("cannot write OBJ file: " + path.string());
+  }
+  out << encodeObj(mesh);
   if (!out) {
     throw std::runtime_error("failed writing OBJ file: " + path.string());
   }

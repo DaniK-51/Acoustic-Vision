@@ -22,6 +22,7 @@ add_executable(av_unit_tests
   unit/test_io.cpp
   unit/test_scene_model.cpp
   unit/test_scene_mesher.cpp
+  unit/test_scenario_from_scene.cpp
   unit/test_mesh.cpp
   unit/test_mesh_gen.cpp
   unit/test_obj_import.cpp
@@ -29,10 +30,13 @@ add_executable(av_unit_tests
   unit/test_sim.cpp
   unit/test_runs_store.cpp
   unit/test_scene_store.cpp
+  unit/test_editor_scene_store.cpp
   unit/test_source_catalog.cpp
-  # Crow-free api helper under test (P2e runs history + interactive Scene Store).
+  # Crow-free api helper under test (P2e runs history + interactive Scene Store
+  # + V0.2 editor scene store).
   ${CMAKE_SOURCE_DIR}/apps/api/runs_store.cpp
   ${CMAKE_SOURCE_DIR}/apps/api/scene_store.cpp
+  ${CMAKE_SOURCE_DIR}/apps/api/editor_scene_store.cpp
 )
 
 target_include_directories(av_unit_tests

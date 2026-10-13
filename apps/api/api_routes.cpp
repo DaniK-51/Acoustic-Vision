@@ -4,6 +4,7 @@ namespace av::api {
 
 void registerRoutes(crow::SimpleApp& app, JobManager& jobs, EventHub& hub,
                     RunsStore& runs, SceneStore& scenes,
+                    EditorSceneStore& editorScenes,
                     const SourceCatalog& sourceCatalog) {
   registerHealthRoutes(app, sourceCatalog);
   registerScenarioRoutes(app, scenes);
@@ -11,6 +12,7 @@ void registerRoutes(crow::SimpleApp& app, JobManager& jobs, EventHub& hub,
   registerRunRoutes(app, jobs, runs);
   registerJobRoutes(app, jobs);
   registerEventRoutes(app, hub, scenes);
+  registerEditorSceneRoutes(app, editorScenes);
 }
 
 }  // namespace av::api

@@ -55,11 +55,11 @@ REGISTER_ENGINE(ImageSourceEngine);
 
 `EngineRegistry` отдаёт список descriptor'ов и фабрики по `id`.
 
-## 2. Как добавить метод (на этапе реализации)
+## 2. Как добавить метод
 
-1. Создать `engines/<name>/` (по образцу `_template/`, появится в P0).
-2. Реализовать `IEngine`: `descriptor` (+ `paramsSchema`), `validate`, `run`.
-3. Зарегистрировать `REGISTER_ENGINE(...)`.
+1. Реализовать `IEngine` в `libs/core/src/acoustics/` (там же `sabine_eyring_engine.cpp` и др.) или в отдельном модуле `engines/<name>/` при желании вынести его наружу.
+2. Заполнить `descriptor` (+ `paramsSchema`, `artifacts`), `validate`, `run`.
+3. Зарегистрировать `REGISTER_ENGINE(...)` в `builtin_engines.cpp` (или своём TU).
 4. Добавить unit/golden-тест, если есть аналитическая проверка.
 5. Собрать. Метод появится в `GET /v1/engines` и в GUI без правок UI.
 
@@ -76,13 +76,13 @@ REGISTER_ENGINE(ImageSourceEngine);
 
 ## 4. Методы в roadmap
 
-| id | Модель | Комнаты | Выдаёт | Фаза |
-|----|--------|---------|--------|------|
-| `sabine-eyring` | Аналитика T=0.161·V/(S·ᾱ) | rect (V, S, ᾱ) | RT60 | P0 |
-| `image-source` | Зеркальные источники | rect | IR, метрики, ранние пути | P0 |
-| `ray-tracing` | Лучи + BVH | mesh | IR, метрики, paths, поле | P2 |
-| `hybrid` | Один RT-проход, early/late split | mesh | полное IR | P2 |
-| `fdtd` / моды | Волновое | small rect | LF-моды | later / plugin |
+| id | Модель | Комнаты | Выдаёт (artifacts) | Фаза |
+|----|--------|---------|--------------------|------|
+| `sabine-eyring` | Аналитика T=0.161·V/(S·ᾱ) | rect (V, S, ᾱ) | `metrics` | P0 |
+| `image-source` | Зеркальные источники | rect | `metrics`, `ir` | P0 |
+| `ray-tracing` | Лучи + BVH | mesh | `metrics`, `ir`, `rays`, `field` | P2 |
+| `hybrid` | Один RT-проход, early/late split | mesh | `metrics`, `ir`, `rays`, `field` | P2 |
+| `fdtd` / моды | Волновое | small rect | `metrics` (LF-моды) | later / plugin |
 
 **`hybrid` (P2g).** Один стохастический RT-проход на mesh (как `ray-tracing`);
 депозиты с `pathTime < earlyTimeSec` (по умолчанию 0.08 с) **или** порядком
@@ -128,14 +128,6 @@ capture/grid).
 
 `methodParams` валидируется по `paramsSchema` конкретного engine.
 
-## 8. Шаблон (появится в P0)
+## 8. Где лежат реализации
 
-```
-engines/_template/
-├── CMakeLists.txt
-├── include/av/engines/template_engine.hpp
-├── src/template_engine.cpp
-└── README.md
-```
-
-Репозиторий сейчас на стадии архитектуры — исходников ещё нет.
+In-repo методы живут в `libs/core/src/acoustics/` (`sabine_eyring_engine.cpp`, `image_source_engine.cpp`, `ray_tracing_engine.cpp`, `hybrid_engine.cpp`, общий `rt_core.*`) + регистрация в `builtin_engines.cpp`. Каталог `engines/` зарезервирован под будущие standalone-модули / `_template/` — сейчас там только README.

@@ -1,6 +1,6 @@
 # Acoustic-Vision — идея продукта
 
-**Стадия:** P0–P3 backend реализован (engines, mesh, field, runs, catalog, scene.patch). GUI — следующий этап. Контракты — [`engines.md`](engines.md); модули и API — [`ARCHITECTURE.md`](../ARCHITECTURE.md).
+**Стадия:** P0–P3 backend реализован (engines, mesh, field, runs, catalog, scene.patch). GUI — прототип в `gui/` (срезы GUI1–4 + V0.1.1); полный редактор помещений (V0.2) — в работе / по запросу. Контракты — [`engines.md`](engines.md); модули и API — [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 ## 1. Видение (согласовано)
 
@@ -90,12 +90,12 @@
 ┌───────────────────────────▼─────────────────────────────┐
 │  av_core  (C++)                                          │
 │  geometry · materials · sources · metrics · Engine API   │
-│    ├─ sabine-eyring / image-source / ray-tracing / …     │
-│    ├─ artifacts: point | field | rays | ir | findings    │
-│    └─ combinator (несколько engines на сцену)            │
+│    ├─ sabine-eyring / image-source / ray-tracing / hybrid│
+│    ├─ artifacts: metrics | ir | field | rays | findings  │
+│    └─ combinator (позже: несколько engines на сцену)     │
 └───────────────────────────┬─────────────────────────────┘
 ┌───────────────────────────▼─────────────────────────────┐
-│  av_io — OBJ/glTF · scenario JSON · WAV/CSV · field      │
+│  av_io — OBJ/glTF · scenario JSON · WAV · field JSON     │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -103,7 +103,7 @@
 
 | Режим | Когда | Протокол | Результат |
 |-------|-------|----------|-----------|
-| **Interactive** | Перетаскивание, правка сцены | WS `scene.patch` (дельты: позиция/ориентация/материал); статика уже на бэке | Обновлённая Scene Store; опц. draft-preview |
+| **Interactive** | Перетаскивание, правка сцены | WS `scene.patch` (v1-дельты: `move`, `setPower`); статика уже на бэке | Обновлённая Scene Store; опц. draft-preview |
 | **Compute** | Кнопка «Расчёт» | REST `POST /simulations` → job; WS `job.progress` | Полный Result (IR / field / rays / …); может занимать **часы**, GPU/CPU |
 
 Интерактив **не** обязан пересчитывать полную акустику за 1 с. Быстрая обратная связь — синхронизация сцены; тяжёлые методы — отдельной кнопкой.
@@ -116,7 +116,7 @@ JSON-документ (`schemas/scenario.schema.json`):
 - **materials** — α(f) по октавным полосам + scattering;
 - **sources** — позиция, ориентация, power, АЧХ, directivity (custom или ref каталога);
 - **receivers** — точки наблюдения (и/или spatial grid для поля);
-- **params** — `engine`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `methodParams`.
+- **params** — `engine`, `maxReflectionOrder`, `sampleRate`, `durationSec`, `bandsHz`, `speedOfSound`, `capturePaths`, `airAbsorption`, `signedIr`, `fieldGrid`, `methodParams`.
 
 ### Result — единый для всех методов
 
@@ -127,7 +127,7 @@ JSON-документ (`schemas/scenario.schema.json`):
     "edt":  { "500": 0.31 },
     "earlyReflections": [{ "t": 0.012, "amp": 0.4, "order": 1 }]
   },
-  "ir": { "sampleRate": 48000, "channels": ["src-1:rcv-1"], "urls": { "wav": "..." } },
+  "ir": { "sampleRate": 48000, "durationSec": 1.5, "channels": 1, "channelNames": ["src-1:rcv-1"], "bandsHz": [] },
   "field": { "nx": 32, "ny": 16, "nz": 24, "origin": [0, 0, 0], "cellSize": 0.19, "bandHz": 1000, "unit": "energy", "values": [] },
   "rays": { "paths": [{ "points": [[0, 0, 0], [1, 0, 0]], "amplitude": 0.9, "order": 1 }] }
 }
@@ -145,21 +145,24 @@ JSON-документ (`schemas/scenario.schema.json`):
 - WS: `ws://localhost:8787/v1/events`
 - JSON only. Ошибки: `{ type, title, status, detail, fields? }`.
 
+Реализовано (P0–P3 backend):
+
 | Метод | Путь | Назначение |
 |-------|------|------------|
 | GET | `/v1/health` | статус, версия |
-| GET | `/v1/engines` | descriptor'ы методов (caps + paramsSchema) |
-| GET/POST | `/v1/materials`, `/v1/rooms`, `/v1/sources`, `/v1/receivers`, `/v1/scenarios` | CRUD |
+| GET | `/v1/engines` | descriptor'ы методов (caps + paramsSchema + artifacts) |
+| GET | `/v1/bands` | сетка частот |
 | GET | `/v1/source-catalog` | built-in каталог приборов (мощность, АЧХ, directivity) |
-| POST | `/v1/rooms/import` | OBJ/glTF → room |
-| POST | `/v1/simulations` | запуск → job (WS progress) или `?sync=1` |
+| POST/GET | `/v1/scenarios`, `/v1/scenarios/{id}` | сохранить/прочитать сцену → `sceneId`, `sceneVersion` |
+| POST | `/v1/simulations` | запуск (inline scenario или `{"sceneId"}`) → job (WS progress) или `?sync=1` |
 | GET | `/v1/runs` | **история запусков** (новые сверху; фильтр `?engine=`) |
 | GET | `/v1/runs/{id}` | один run + ссылки на result/ir/field (принимает `runId` или `jobId`; ссылки по `jobId`) |
-| GET | `/v1/simulations/{id}/ir` \| `/metrics` \| `/paths` \| `/field` | артефакты |
 | GET | `/v1/jobs/{id}` · POST `/v1/jobs/{id}/cancel` | async lifecycle |
-| GET | `/v1/bands` | сетка частот |
+| GET | `/v1/jobs/{id}/result` \| `/ir.wav` \| `/field` | артефакты (metrics / IR / field / rays по caps engine) |
 
-WS: `job.progress` · `job.succeeded` · `job.failed` · `job.cancelled` · (P3) `simulation.reflection`
+Запланировано (фаза GUI/редактора — пока не реализовано): CRUD `/v1/materials`, `/v1/rooms`, `/v1/sources`, `/v1/receivers`; `POST /v1/rooms/import`; `GET/PATCH/DELETE /v1/scenarios/{id}`; `GET /v1/scenarios/{id}/validate`. Сегодня room/materials/sources/receivers живут inline в scenario JSON.
+
+WS: `scene.patch` / `scene.patched` / `scene.error` · `job.progress` · `job.succeeded` · `job.failed` · `job.cancelled` · (P3) `simulation.reflection`
 
 **Interactive UX:** WS `scene.patch` / `scene.patched` — дельты позиций при drag; статическая часть сцены живёт на бэке. Compute UX: WS `job.progress` (можно часы).
 
@@ -175,19 +178,20 @@ WS: `job.progress` · `job.succeeded` · `job.failed` · `job.cancelled` · (P3)
 
 ## 8. Roadmap
 
-| Фаза | Поставка | Критерий готовности |
-|------|----------|---------------------|
-| **P0** | Engine API + Sabine/Eyring + ISM + metrics + CLI | RT60 из IR ≈ аналитике; «новый engine = файл + register» |
-| **P1** | av-api REST/WS, jobs, runs history, schemas | Контракт `/v1` заморожен |
-| **P2** | OBJ/glTF, mesh, RayTracing, paths, **spatial field** | glTF считается; поле на гриде |
-| **P2.5** | Dynamic plugin SDK (C ABI) | Внешний sample.dll без пересборки |
-| **P3** | Electron+Vue+Three.js: **базовый** 3D-редактор, scene.patch, catalog, кнопка «Расчёт» | drag → WS-дельта; run стартует job |
-| **P4** | Research-алгоритмы, каталог источников, сравнение runs | research engine подключён без правок GUI |
-| **P5** | Полноценный 3D-редактор (DCC-фичи) | сложная геометрия без внешних редакторов |
+| Фаза | Поставка | Статус / критерий готовности |
+|------|----------|------------------------------|
+| **P0** | Engine API + Sabine/Eyring + ISM + metrics + CLI | **done** — RT60 из IR ≈ аналитике; «новый engine = файл + register» |
+| **P1** | av-api REST/WS, jobs, runs history, schemas | **done** — контракт `/v1` заморожен |
+| **P2** | OBJ/glTF, mesh, RayTracing, hybrid, paths, **spatial field** | **done** — glTF считается; поле на гриде |
+| **P3 backend** | source catalog, Scene Store, `scene.patch` | **done** |
+| **P2.5** | Dynamic plugin SDK (C ABI) | **только по запросу** |
+| **P3 GUI** | Electron+Vue+Three.js | прототип **есть** (`gui/`: GUI1–4 + V0.1.1); редактор помещений (V0.2) — **в работе / по запросу** |
+| **P4** | Research-алгоритмы, сравнение runs | **later** — research engine подключён без правок GUI |
+| **P5** | Полноценный 3D-редактор (DCC-фичи) | **later** — сложная геометрия без внешних редакторов |
 
 ### Не в v1
 
-Measurement/mic/phone pipeline · real-time DSP 60 FPS · HRTF · multi-room · auth · тяжёлый Study/diff · обязательный GPU в P0 (движки с GPU — позже, job queue уже под long-run).
+Measurement/mic/phone pipeline · FDTD/волновые солверы, дифракция · real-time DSP 60 FPS · HRTF · multi-room · distributed compute · auth/multi-tenant · тяжёлый Study/diff · обязательный GPU в P0 (движки с GPU — позже, job queue уже под long-run).
 
 ## 9. Риски
 

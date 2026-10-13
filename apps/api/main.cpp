@@ -18,6 +18,7 @@
 
 #include "api_routes.hpp"
 #include "api_support.hpp"
+#include "editor_scene_store.hpp"
 #include "job_watcher.hpp"
 #include "runs_store.hpp"
 #include "scene_store.hpp"
@@ -79,10 +80,12 @@ int main(int argc, char** argv) {
   av::api::EventHub hub;
   av::api::RunsStore runs;
   av::api::SceneStore scenes;
+  av::api::EditorSceneStore editorScenes;
   av::api::JobWatcher watcher(jobs, hub, runs);
 
   crow::SimpleApp app;
-  av::api::registerRoutes(app, jobs, hub, runs, scenes, sourceCatalog);
+  av::api::registerRoutes(app, jobs, hub, runs, scenes, editorScenes,
+                          sourceCatalog);
   watcher.start();
 
   std::cout << "av-api listening on http://" << bindAddr << ':' << port

@@ -23,10 +23,10 @@
 - [x] volume mesh stub (hex-box)
 
 ### R9 — API
-- [ ] GET/POST `/v1/scenes`, PATCH entities
-- [ ] POST `/v1/scenes/{id}/mesh` (job)
-- [ ] GET mesh.obj + mesh-report
-- [ ] POST `/v1/scenes/{id}/to-scenario`
+- [x] GET/POST `/v1/scenes`, PATCH entities (v1: PUT/PATCH full document)
+- [x] POST `/v1/scenes/{id}/mesh` (job)
+- [x] GET mesh.obj + mesh-report
+- [x] POST `/v1/scenes/{id}/to-scenario`
 
 ### R10 — Docs + ru-check
 - [ ] README / idea / room-editor-mesh sync

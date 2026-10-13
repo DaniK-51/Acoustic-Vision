@@ -45,11 +45,13 @@ add_executable(av-api
   main.cpp
   api_routes.cpp
   api_support.cpp
+  editor_scene_store.cpp
   job_watcher.cpp
   routes_events.cpp
   routes_health_engines.cpp
   routes_jobs_runs.cpp
   routes_scenes.cpp
+  routes_editor_scenes.cpp
   routes_simulations.cpp
   runs_store.cpp
   scene_store.cpp

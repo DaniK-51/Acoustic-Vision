@@ -590,6 +590,200 @@ def main():
         expect(status == 400 and body.get("status") == 400, f"bad scenario: {status} {body}")
         print("ok: error paths")
 
+        # V0.2 R9: room-editor scenes (/v1/scenes) + mesh job + to-scenario.
+        # Closed box = 4 walls + floor/ceiling slabs, the rect-compile shape.
+        def wall(wid, start, end, inner):
+            return {
+                "type": "wall", "id": wid, "start": start, "end": end,
+                "height": 2.8, "thickness": 0.2,
+                "faces": {"inner": inner, "outer": "mat-outer", "side": "mat-side"},
+            }
+
+        def slab(sid, origin, size, material):
+            return {
+                "type": "solid_box", "id": sid, "origin": origin,
+                "size": size, "materialId": material,
+            }
+
+        def material(mid):
+            return {
+                "id": mid, "name": mid,
+                "bandsHz": [125, 250, 500, 1000, 2000, 4000],
+                "absorption": [0.1, 0.1, 0.12, 0.15, 0.15, 0.2],
+                "scattering": 0.1,
+            }
+
+        box_scene = {
+            "schemaVersion": 1,
+            "id": "editor-box",
+            "units": "m",
+            "materials": [material(m) for m in
+                          ("mat-south", "mat-east", "mat-north", "mat-west",
+                           "mat-floor", "mat-ceiling", "mat-outer", "mat-side")],
+            "entities": [
+                wall("wall-south", [0, 0, 0], [6, 0, 0], "mat-south"),
+                wall("wall-east", [6, 0, 0], [6, 4, 0], "mat-east"),
+                wall("wall-north", [6, 4, 0], [0, 4, 0], "mat-north"),
+                wall("wall-west", [0, 4, 0], [0, 0, 0], "mat-west"),
+                slab("floor", [0, 0, 0], [6, 4, 0.2], "mat-floor"),
+                slab("ceiling", [0, 0, 2.6], [6, 4, 0.2], "mat-ceiling"),
+            ],
+            "sources": [{"id": "src-1", "position": [1.5, 2.0, 1.4],
+                         "powerDb": 80.0}],
+            "receivers": [{"id": "rcv-1", "position": [4.5, 1.0, 1.2]}],
+            "meshSettings": {"surface": {"quality": "draft"}},
+        }
+
+        status, created = http("POST", f"{base}/v1/scenes", box_scene)
+        expect(status == 201, f"POST /v1/scenes: {status} {created}")
+        editor_id = created.get("sceneId")
+        expect(isinstance(editor_id, str) and editor_id, f"editor sceneId: {created}")
+        expect(created.get("sceneVersion") == 1, f"editor sceneVersion: {created}")
+        expect(str(editor_id).startswith("scene-"), f"editor id prefix: {editor_id}")
+        print(f"ok: editor scene create ({editor_id})")
+
+        status, loaded = http("GET", f"{base}/v1/scenes/{editor_id}")
+        expect(status == 200, f"GET /v1/scenes: {status} {loaded}")
+        expect(loaded.get("sceneVersion") == 1, f"editor get version: {loaded}")
+        doc = loaded.get("scene")
+        expect(isinstance(doc, dict) and doc.get("id") == "editor-box",
+               f"editor doc id: {doc}")
+        expect(len(doc.get("entities", [])) == 6, f"editor geometry count: {doc}")
+        expect(len(doc.get("sources", [])) == 1, f"editor sources: {doc}")
+        expect(doc.get("sources", [{}])[0].get("position") == [1.5, 2.0, 1.4],
+               f"editor source round-trip: {doc.get('sources')}")
+        status, body = http("GET", f"{base}/v1/scenes/nope")
+        expect(status == 404 and body.get("status") == 404, f"editor 404: {status} {body}")
+        print("ok: editor scene get + 404")
+
+        # Mesh generation: sync=1 answers with the finished report.
+        status, mesh_job = http("POST", f"{base}/v1/scenes/{editor_id}/mesh?sync=1")
+        expect(status == 200, f"mesh sync: {status} {mesh_job}")
+        expect(mesh_job.get("state") == "succeeded", f"mesh state: {mesh_job}")
+        expect(str(mesh_job.get("jobId", "")).startswith("meshjob-"),
+               f"meshjob id prefix: {mesh_job}")
+        report = mesh_job.get("report") or {}
+        expect(report.get("kind") == "surface", f"mesh report kind: {report}")
+        stats = report.get("stats", {})
+        expect(stats.get("triangles", 0) > 0, f"mesh report stats: {stats}")
+        expect(isinstance(report.get("entityTriangleCount"), dict)
+               and report["entityTriangleCount"], f"mesh entity trace: {report}")
+        print(f"ok: mesh job sync ({mesh_job.get('jobId')}, "
+              f"{stats.get('triangles')} tris)")
+
+        status, mesh_get = http("GET", f"{base}/v1/scenes/{editor_id}/mesh")
+        expect(status == 200 and mesh_get.get("state") == "succeeded",
+               f"GET mesh report: {status} {mesh_get}")
+        expect(mesh_get.get("report", {}).get("stats") == stats,
+               f"GET mesh report matches: {mesh_get}")
+        status, obj_bytes = http("GET", f"{base}/v1/scenes/{editor_id}/mesh.obj",
+                                 raw=True)
+        expect(status == 200 and obj_bytes[:2] in (b"v ", b"# "),
+               f"mesh.obj bytes: {status} {obj_bytes[:40]!r}")
+        expect(b"\nv " in obj_bytes and b"\nf " in obj_bytes,
+               f"mesh.obj has verts/faces: {len(obj_bytes)} bytes")
+        print(f"ok: mesh report + mesh.obj ({len(obj_bytes)} bytes)")
+
+        # to-scenario: the closed box compiles to a rect room and is submittable.
+        status, rect_scenario = http("POST", f"{base}/v1/scenes/{editor_id}/to-scenario")
+        expect(status == 200, f"to-scenario rect: {status} {rect_scenario}")
+        expect(rect_scenario.get("room", {}).get("type") == "rect",
+               f"to-scenario room type: {rect_scenario.get('room')}")
+        size = rect_scenario["room"].get("size") or {}
+        # Scene is Z-up (x=6, y=4, z=2.8); rect is Y-up (w=6, h=2.8, d=4).
+        expect(size.get("w") == 6.0 and size.get("h") == 2.8 and size.get("d") == 4.0,
+               f"to-scenario rect size: {size}")
+        faces = rect_scenario["room"].get("faces", {})
+        expect(faces.get("floor") == "mat-floor" and faces.get("ceiling") == "mat-ceiling",
+               f"to-scenario slab materials: {faces}")
+        expect(faces.get("x+") == "mat-east" and faces.get("x-") == "mat-west",
+               f"to-scenario x faces: {faces}")
+        expect(faces.get("z+") == "mat-north" and faces.get("z-") == "mat-south",
+               f"to-scenario z faces: {faces}")
+        expect(rect_scenario.get("params", {}).get("engine") == "image-source",
+               f"to-scenario engine: {rect_scenario.get('params')}")
+        src = rect_scenario.get("sources", [{}])[0]
+        # (1.5, 2.0, 1.4) Z-up -> (1.5, 1.4, 2.0) rect Y-up.
+        expect(src.get("position") == [1.5, 1.4, 2.0],
+               f"to-scenario source swap: {src}")
+        print("ok: to-scenario rect compile + axis swap")
+
+        status, accepted = http("POST", f"{base}/v1/simulations?sync=1", rect_scenario)
+        expect(status == 200 and accepted.get("state") == "succeeded",
+               f"to-scenario rect submit: {status} {accepted}")
+        expect("metrics" in accepted and "rt60" in accepted["metrics"],
+               f"to-scenario rect metrics: {accepted}")
+        print("ok: to-scenario rect simulation")
+
+        # Full-document replace (PUT) bumps the version and drops stale mesh.
+        updated = json.loads(json.dumps(box_scene))
+        updated["materials"][0]["absorption"] = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+        status, replaced = http("PUT", f"{base}/v1/scenes/{editor_id}", updated)
+        expect(status == 200 and replaced.get("sceneVersion") == 2,
+               f"PUT replace: {status} {replaced}")
+        status, body = http("GET", f"{base}/v1/scenes/{editor_id}/mesh")
+        expect(status == 404, f"mesh dropped after replace: {status} {body}")
+        status, body = http("GET", f"{base}/v1/scenes/{editor_id}/mesh.obj")
+        expect(status == 404, f"mesh.obj dropped after replace: {status} {body}")
+        print("ok: PUT replace bumps version and drops mesh")
+
+        # Async mesh job (default) — 202 + jobId, report lands on GET mesh.
+        status, accepted = http("POST", f"{base}/v1/scenes/{editor_id}/mesh")
+        expect(status == 202 and accepted.get("jobId"), f"mesh async: {status} {accepted}")
+        mesh_id = accepted["jobId"]
+        for _ in range(80):
+            status, st = http("GET", f"{base}/v1/scenes/{editor_id}/mesh")
+            expect(status == 200, f"mesh poll: {status} {st}")
+            if st.get("state") in ("succeeded", "failed", "cancelled"):
+                break
+            time.sleep(0.1)
+        expect(st.get("state") == "succeeded", f"mesh async final: {st}")
+        expect(st.get("jobId") == mesh_id, f"mesh async jobId: {st}")
+        expect(st.get("report", {}).get("stats", {}).get("triangles", 0) > 0,
+               f"mesh async report: {st}")
+        print(f"ok: mesh job async ({mesh_id})")
+
+        # PATCH is the docs-table verb for the same full replace.
+        status, patched = http("PATCH", f"{base}/v1/scenes/{editor_id}", updated)
+        expect(status == 200 and patched.get("sceneVersion") == 3,
+               f"PATCH replace: {status} {patched}")
+        print("ok: PATCH full replace")
+
+        # Open shell (no floor/ceiling) -> mesh room with a temp OBJ uri.
+        open_scene = json.loads(json.dumps(box_scene))
+        open_scene["id"] = "editor-open"
+        open_scene["entities"] = box_scene["entities"][:4]
+        status, created = http("POST", f"{base}/v1/scenes", open_scene)
+        expect(status == 201, f"open scene create: {status} {created}")
+        open_id = created["sceneId"]
+        status, mesh_scenario = http("POST", f"{base}/v1/scenes/{open_id}/to-scenario")
+        expect(status == 200, f"to-scenario mesh: {status} {mesh_scenario}")
+        room = mesh_scenario.get("room", {})
+        expect(room.get("type") == "mesh", f"to-scenario mesh room: {room}")
+        uri = room.get("mesh", {}).get("uri")
+        expect(isinstance(uri, str) and uri.endswith(".obj") and os.path.isfile(uri),
+               f"to-scenario mesh uri file: {uri}")
+        expect(mesh_scenario.get("params", {}).get("engine") == "ray-tracing",
+               f"to-scenario mesh engine: {mesh_scenario.get('params')}")
+        src = mesh_scenario.get("sources", [{}])[0]
+        expect(src.get("position") == [1.5, 2.0, 1.4],
+               f"mesh path keeps Z-up positions: {src}")
+        status, accepted = http("POST", f"{base}/v1/simulations?sync=1", mesh_scenario)
+        expect(status == 200 and accepted.get("state") == "succeeded",
+               f"to-scenario mesh submit: {status} {accepted}")
+        print("ok: to-scenario mesh room + ray-tracing submit")
+
+        status, body = http("POST", f"{base}/v1/scenes", {"schemaVersion": 1})
+        expect(status == 400 and body.get("status") == 400,
+               f"bad editor scene: {status} {body}")
+        status, body = http("PUT", f"{base}/v1/scenes/nope", box_scene)
+        expect(status == 404, f"PUT unknown: {status} {body}")
+        status, body = http("POST", f"{base}/v1/scenes/nope/mesh")
+        expect(status == 404, f"mesh unknown scene: {status} {body}")
+        status, body = http("POST", f"{base}/v1/scenes/nope/to-scenario")
+        expect(status == 404, f"to-scenario unknown: {status} {body}")
+        print("ok: editor scene error paths")
+
         print("ALL API SMOKE TESTS PASSED")
     finally:
         server.terminate()

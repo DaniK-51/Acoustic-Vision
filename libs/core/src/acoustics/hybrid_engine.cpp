@@ -1,6 +1,5 @@
 #include <av/acoustics/engine.hpp>
 #include <av/geometry/mesh.hpp>
-#include <av/materials/material.hpp>
 #include <av/metrics/metrics.hpp>
 
 #include <algorithm>
