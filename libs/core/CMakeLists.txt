@@ -2,6 +2,7 @@ add_library(av_core
   src/materials/material.cpp
   src/scenario/scenario.cpp
   src/scene/scene_model.cpp
+  src/scene/scene_mesher.cpp
   src/metrics/metrics.cpp
   src/geometry/mesh.cpp
   src/geometry/mesh_builder.cpp
