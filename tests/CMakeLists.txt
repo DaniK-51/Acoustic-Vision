@@ -20,6 +20,7 @@ add_executable(av_unit_tests
   unit/test_ray_tracing.cpp
   unit/test_hybrid.cpp
   unit/test_io.cpp
+  unit/test_scene_model.cpp
   unit/test_mesh.cpp
   unit/test_mesh_gen.cpp
   unit/test_obj_import.cpp

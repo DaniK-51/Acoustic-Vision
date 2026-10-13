@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://acoustic-vision.local/schemas/scene.schema.json",
+  "title": "Acoustic-Vision Scene",
+  "description": "Room-editor scene document (V0.2, docs/room-editor-mesh.md). Parallel to scenario.schema.json — does not replace it. Units are meters only. Geometry entities live in `entities`; source/receiver placements are serialized into top-level `sources` / `receivers` (also accepted typed inside `entities`).",
+  "type": "object",
+  "required": ["schemaVersion", "units", "materials", "entities"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "minimum": 1 },
+    "id": { "type": "string" },
+    "units": {
+      "const": "m",
+      "description": "Meters only; conversion happens at import (AGENTS.md decision 14)."
+    },
+    "materials": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/material" }
+    },
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity" }
+    },
+    "sources": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/sourceEntry" },
+      "description": "Source placements (same home as scenario.sources). sceneToJson writes SourceRef entities here."
+    },
+    "receivers": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/receiverEntry" }
+    },
+    "meshSettings": { "$ref": "#/$defs/meshSettings" }
+  },
+  "$defs": {
+    "vec3": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "vec2": {
+      "type": "array",
+      "items": { "type": "number" },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "material": {
+      "type": "object",
+      "required": ["id", "absorption"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "bandsHz": {
+          "type": "array",
+          "items": { "type": "number", "exclusiveMinimum": 0 }
+        },
+        "absorption": {
+          "type": "array",
+          "items": { "type": "number", "minimum": 0, "maximum": 1 }
+        },
+        "scattering": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "required": ["type", "offset", "width", "height"],
+      "properties": {
+        "type": { "enum": ["door", "window"] },
+        "offset": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Meters along the wall baseline from `start`."
+        },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "sill": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Height of the opening bottom above the wall base; default 0."
+        }
+      }
+    },
+    "wall": {
+      "type": "object",
+      "required": ["type", "id", "start", "end", "height", "thickness", "faces"],
+      "properties": {
+        "type": { "const": "wall" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "start": { "$ref": "#/$defs/vec3" },
+        "end": { "$ref": "#/$defs/vec3" },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "thickness": { "type": "number", "exclusiveMinimum": 0 },
+        "faces": {
+          "type": "object",
+          "required": ["inner", "outer", "side"],
+          "properties": {
+            "inner": { "type": "string", "minLength": 1 },
+            "outer": { "type": "string", "minLength": 1 },
+            "side": { "type": "string", "minLength": 1 }
+          }
+        },
+        "openings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/opening" }
+        }
+      }
+    },
+    "solidBox": {
+      "type": "object",
+      "required": ["type", "id", "origin", "size", "materialId"],
+      "properties": {
+        "type": { "const": "solid_box" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "origin": { "$ref": "#/$defs/vec3" },
+        "size": { "$ref": "#/$defs/vec3" },
+        "materialId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "solidExtrude": {
+      "type": "object",
+      "required": ["type", "id", "polygon", "height", "materialId"],
+      "properties": {
+        "type": { "const": "solid_extrude" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "polygon": {
+          "type": "array",
+          "minItems": 3,
+          "items": { "$ref": "#/$defs/vec2" },
+          "description": "2D polygon in XY, extruded along +Z by `height`."
+        },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "materialId": { "type": "string", "minLength": 1 }
+      }
+    },
+    "void": {
+      "type": "object",
+      "required": ["type", "id", "origin", "size"],
+      "properties": {
+        "type": { "const": "void" },
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "origin": { "$ref": "#/$defs/vec3" },
+        "size": { "$ref": "#/$defs/vec3" }
+      }
+    },
+    "sourceBody": {
+      "type": "object",
+      "required": ["id", "position"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "position": { "$ref": "#/$defs/vec3" },
+        "powerDb": { "type": "number" }
+      }
+    },
+    "receiverBody": {
+      "type": "object",
+      "required": ["id", "position"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string" },
+        "position": { "$ref": "#/$defs/vec3" }
+      }
+    },
+    "sourceEntry": {
+      "allOf": [
+        { "$ref": "#/$defs/sourceBody" },
+        {
+          "type": "object",
+          "properties": { "type": { "const": "source" } }
+        }
+      ]
+    },
+    "receiverEntry": {
+      "allOf": [
+        { "$ref": "#/$defs/receiverBody" },
+        {
+          "type": "object",
+          "properties": { "type": { "const": "receiver" } }
+        }
+      ]
+    },
+    "source": {
+      "allOf": [
+        { "$ref": "#/$defs/sourceBody" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": { "type": { "const": "source" } }
+        }
+      ]
+    },
+    "receiver": {
+      "allOf": [
+        { "$ref": "#/$defs/receiverBody" },
+        {
+          "type": "object",
+          "required": ["type"],
+          "properties": { "type": { "const": "receiver" } }
+        }
+      ]
+    },
+    "entity": {
+      "oneOf": [
+        { "$ref": "#/$defs/wall" },
+        { "$ref": "#/$defs/solidBox" },
+        { "$ref": "#/$defs/solidExtrude" },
+        { "$ref": "#/$defs/void" },
+        { "$ref": "#/$defs/source" },
+        { "$ref": "#/$defs/receiver" }
+      ]
+    },
+    "meshSettings": {
+      "type": "object",
+      "properties": {
+        "surface": {
+          "type": "object",
+          "properties": {
+            "algorithm": { "enum": ["auto", "earclip", "advancing-front"] },
+            "targetEdge": { "type": "number", "exclusiveMinimum": 0 },
+            "maxEdge": { "type": "number", "exclusiveMinimum": 0 },
+            "quality": { "enum": ["draft", "standard", "fine"] }
+          }
+        },
+        "volume": {
+          "type": "object",
+          "properties": {
+            "algorithm": { "enum": ["tet", "hex-box"] },
+            "targetSize": { "type": "number", "exclusiveMinimum": 0 },
+            "enabled": { "type": "boolean" }
+          }
+        }
+      }
+    }
+  }
+}

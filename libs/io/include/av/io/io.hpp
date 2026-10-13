@@ -12,6 +12,7 @@
 #include <av/geometry/mesh.hpp>
 #include <av/metrics/metrics.hpp>
 #include <av/scenario/scenario.hpp>
+#include <av/scene/scene_model.hpp>
 
 namespace av {
 
@@ -23,6 +24,17 @@ namespace av {
 // File helpers; throw std::runtime_error on IO or parse failure.
 [[nodiscard]] Scenario loadScenario(const std::filesystem::path& path);
 void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
+
+// Scene JSON <-> Scene, fields of schemas/scene.schema.json (room-editor
+// document, V0.2). Parallel to scenario JSON — does not replace it. Source and
+// receiver entities serialize into top-level `sources` / `receivers`; geometry
+// entities stay in `entities`. Throws std::runtime_error on structural errors.
+[[nodiscard]] nlohmann::json sceneToJson(const Scene& scene);
+[[nodiscard]] Scene sceneFromJson(const nlohmann::json& json);
+
+// File helpers; throw std::runtime_error on IO or parse failure.
+[[nodiscard]] Scene loadScene(const std::filesystem::path& path);
+void saveScene(const Scene& scene, const std::filesystem::path& path);
 
 // Wavefront OBJ export (gen-mesh). Writes v / g / usemtl / f lines, one
 // `g`+`usemtl` pair per materialSlots entry (floor, ceiling, walls for

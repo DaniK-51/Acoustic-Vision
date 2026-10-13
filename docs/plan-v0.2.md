@@ -5,10 +5,10 @@
 ## Слайсы
 
 ### R6 — Scene model (core/io)
-- [ ] `SceneEntity` types: wall, solid_box, solid_extrude, void, source, receiver
-- [ ] `schemas/scene.schema.json`
-- [ ] `sceneFromJson` / `sceneToJson` (av_io)
-- [ ] unit tests round-trip + validation errors
+- [x] `SceneEntity` types: wall, solid_box, solid_extrude, void, source, receiver
+- [x] `schemas/scene.schema.json`
+- [x] `sceneFromJson` / `sceneToJson` (av_io)
+- [x] unit tests round-trip + validation errors
 
 ### R7 — Primitives → SurfaceMesh
 - [ ] wall slab (start/end/height/thickness) → quads→tris, zones inner/outer/side
