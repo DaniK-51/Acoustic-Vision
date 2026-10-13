@@ -313,8 +313,14 @@ MeshSettings::VolumeAlgorithm volumeAlgorithmFromJson(const std::string& value) 
 nlohmann::json meshSettingsToJson(const MeshSettings& settings) {
   nlohmann::json surface;
   surface["algorithm"] = surfaceAlgorithmToString(settings.surface.algorithm);
-  surface["targetEdge"] = settings.surface.targetEdge;
-  surface["maxEdge"] = settings.surface.maxEdge;
+  // targetEdge / maxEdge are optional custom overrides (schema); the quality
+  // preset fills the rest at resolve time — do not bake preset values in.
+  if (settings.surface.targetEdge.has_value()) {
+    surface["targetEdge"] = *settings.surface.targetEdge;
+  }
+  if (settings.surface.maxEdge.has_value()) {
+    surface["maxEdge"] = *settings.surface.maxEdge;
+  }
   surface["quality"] = qualityToString(settings.surface.quality);
 
   nlohmann::json volume;
@@ -336,8 +342,12 @@ MeshSettings meshSettingsFromJson(const nlohmann::json& json) {
       settings.surface.algorithm =
           surfaceAlgorithmFromJson(surface.at("algorithm").get<std::string>());
     }
-    settings.surface.targetEdge = surface.value("targetEdge", 0.5);
-    settings.surface.maxEdge = surface.value("maxEdge", 1.0);
+    if (surface.contains("targetEdge")) {
+      settings.surface.targetEdge = surface.at("targetEdge").get<double>();
+    }
+    if (surface.contains("maxEdge")) {
+      settings.surface.maxEdge = surface.at("maxEdge").get<double>();
+    }
     if (surface.contains("quality")) {
       settings.surface.quality =
           qualityFromJson(surface.at("quality").get<std::string>());

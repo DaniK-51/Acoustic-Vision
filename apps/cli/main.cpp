@@ -17,6 +17,8 @@ void printUsage(std::ostream& out) {
   out << "usage:\n"
       << "  av-cli engines\n"
       << "  av-cli run <scenario.json> [-o outdir]\n"
+      << "  av-cli mesh <scene.json> [-o out.obj] [--report report.json]\n"
+      << "      [--quality draft|standard|fine]\n"
       << "  av-cli gen-mesh box -o room.obj --w <m> --h <m> --d <m>\n"
       << "      [--origin x,y,z] [--scenario room-scenario.json]\n"
       << "  av-cli gen-mesh corridor -o corr.obj --w <m> --h <m> --d <m>\n"
@@ -338,6 +340,103 @@ int generateMesh(const std::vector<std::string>& args) {
   return 0;
 }
 
+av::MeshSettings::Quality parseQuality(const std::string& text) {
+  if (text == "draft") {
+    return av::MeshSettings::Quality::Draft;
+  }
+  if (text == "standard") {
+    return av::MeshSettings::Quality::Standard;
+  }
+  if (text == "fine") {
+    return av::MeshSettings::Quality::Fine;
+  }
+  throw std::runtime_error(
+      "--quality expects draft|standard|fine, got '" + text + "'");
+}
+
+// av-cli mesh (slice R8): scene.json -> surface mesh OBJ + optional
+// mesh-report.json. --quality is a full density override — it replaces the
+// scene's quality and drops custom targetEdge/maxEdge so the preset applies.
+int meshScene(const std::vector<std::string>& args) {
+  if (args.size() < 2) {
+    std::cerr << "error: mesh requires a scene file\n";
+    printUsage(std::cerr);
+    return 1;
+  }
+
+  std::filesystem::path scenePath;
+  std::filesystem::path outPath;
+  std::filesystem::path reportPath;
+  bool qualityOverride = false;
+  av::MeshSettings::Quality quality = av::MeshSettings::Quality::Draft;
+
+  for (std::size_t i = 1; i < args.size(); ++i) {
+    const std::string& arg = args[i];
+    auto takeValue = [&](const std::string& flag) -> std::string {
+      if (i + 1 >= args.size()) {
+        throw std::runtime_error(flag + " requires a value");
+      }
+      return args[++i];
+    };
+    if (arg == "-o" || arg == "--out") {
+      outPath = takeValue(arg);
+    } else if (arg == "--report") {
+      reportPath = takeValue(arg);
+    } else if (arg == "--quality") {
+      quality = parseQuality(takeValue(arg));
+      qualityOverride = true;
+    } else if (scenePath.empty()) {
+      scenePath = arg;
+    } else {
+      std::cerr << "error: unexpected argument '" << arg << "'\n";
+      printUsage(std::cerr);
+      return 1;
+    }
+  }
+  if (scenePath.empty()) {
+    std::cerr << "error: mesh requires a scene file\n";
+    printUsage(std::cerr);
+    return 1;
+  }
+  if (outPath.empty()) {
+    outPath = scenePath;
+    outPath.replace_extension(".obj");
+  }
+
+  av::Scene scene = av::loadScene(scenePath);
+  if (qualityOverride) {
+    scene.meshSettings.surface.quality = quality;
+    scene.meshSettings.surface.targetEdge.reset();
+    scene.meshSettings.surface.maxEdge.reset();
+  }
+
+  const std::vector<std::string> errors = av::validateScene(scene);
+  for (const std::string& error : errors) {
+    std::cerr << "error: " << error << '\n';
+  }
+  if (!errors.empty()) {
+    return 1;
+  }
+
+  const av::ResolvedSurfaceMeshSettings resolved =
+      av::resolveSurfaceMeshSettings(scene.meshSettings);
+  const av::SurfaceMeshResult result =
+      av::generateSurfaceMesh(scene, scene.meshSettings);
+  for (const std::string& warning : result.warnings) {
+    std::cerr << "warning: " << warning << '\n';
+  }
+
+  av::saveObj(outPath, result.mesh);
+  std::cout << "wrote " << outPath.string() << " (" << result.mesh.positions.size()
+            << " vertices, " << result.mesh.triangles.size() << " triangles)\n";
+
+  if (!reportPath.empty()) {
+    av::writeMeshReport(reportPath, av::meshReportFrom(result, resolved));
+    std::cout << "wrote " << reportPath.string() << '\n';
+  }
+  return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -383,6 +482,9 @@ int main(int argc, char** argv) {
     }
     if (args[0] == "gen-mesh") {
       return generateMesh(args);
+    }
+    if (args[0] == "mesh") {
+      return meshScene(args);
     }
     std::cerr << "error: unknown command '" << args[0] << "'\n";
     printUsage(std::cerr);

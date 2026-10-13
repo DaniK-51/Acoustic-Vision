@@ -17,10 +17,10 @@
 - [ ] entity→triangle map for picking
 
 ### R8 — Mesh settings + report + CLI
-- [ ] `meshSettings.surface` presets draft/standard/fine
-- [ ] `mesh-report.json` (stats, warnings, entityTriangleCount)
-- [ ] `av-cli mesh <scene.json> -o out.obj --quality standard`
-- [ ] volume mesh stub (hex-box)
+- [x] `meshSettings.surface` presets draft/standard/fine
+- [x] `mesh-report.json` (stats, warnings, entityTriangleCount)
+- [x] `av-cli mesh <scene.json> -o out.obj --quality standard`
+- [x] volume mesh stub (hex-box)
 
 ### R9 — API
 - [ ] GET/POST `/v1/scenes`, PATCH entities

@@ -396,3 +396,66 @@ TEST(Io, FieldToJsonShapeAndWrite) {
   EXPECT_TRUE(av::resultToJson(emptyRays)["rays"]["paths"].empty());
   EXPECT_FALSE(av::resultToJson(av::Result{}).contains("rays"));
 }
+
+av::SurfaceMeshResult makeSurfaceResult() {
+  av::SurfaceMeshResult result;
+  result.mesh.positions = {{0.0, 0.0, 0.0}, {6.0, 0.0, 0.0}, {6.0, 0.0, 2.8}};
+  result.mesh.triangles.push_back(av::Triangle{0, 1, 2, 0});
+  result.mesh.materialSlots = {"mat-brick"};
+  result.entityTriangleCount = {{"wall-north", 1}};
+  result.warnings = {"wall 'wall-north' openings[0]: simple hole without reveal faces (v1)"};
+  return result;
+}
+
+TEST(Io, MeshReportJsonShapeMatchesDocs) {
+  const av::SurfaceMeshResult result = makeSurfaceResult();
+  av::ResolvedSurfaceMeshSettings settings;
+  settings.algorithm = av::MeshSettings::SurfaceAlgorithm::Earclip;
+  settings.targetEdge = 0.2;
+  settings.maxEdge = 0.5;
+
+  const av::MeshReport report = av::meshReportFrom(result, settings);
+  const nlohmann::json json = av::meshReportToJson(report);
+
+  EXPECT_EQ(json.at("kind").get<std::string>(), "surface");
+  EXPECT_EQ(json.at("stats").at("vertices").get<std::size_t>(), 3U);
+  EXPECT_EQ(json.at("stats").at("triangles").get<std::size_t>(), 1U);
+  ASSERT_TRUE(json.at("stats").at("zones").is_array());
+  ASSERT_EQ(json.at("stats").at("zones").size(), 1U);
+  EXPECT_EQ(json.at("stats").at("zones").at(0).get<std::string>(), "mat-brick");
+
+  ASSERT_TRUE(json.at("bbox").is_array());
+  ASSERT_EQ(json.at("bbox").size(), 2U);
+  EXPECT_DOUBLE_EQ(json.at("bbox").at(0).at(0).get<double>(), 0.0);
+  EXPECT_DOUBLE_EQ(json.at("bbox").at(1).at(0).get<double>(), 6.0);
+  EXPECT_DOUBLE_EQ(json.at("bbox").at(1).at(2).get<double>(), 2.8);
+
+  ASSERT_TRUE(json.at("warnings").is_array());
+  ASSERT_EQ(json.at("warnings").size(), 1U);
+  EXPECT_NE(json.at("warnings").at(0).get<std::string>().find("reveal"),
+            std::string::npos);
+
+  const nlohmann::json& used = json.at("settingsUsed");
+  EXPECT_EQ(used.at("algorithm").get<std::string>(), "earclip");
+  EXPECT_DOUBLE_EQ(used.at("targetEdge").get<double>(), 0.2);
+  EXPECT_DOUBLE_EQ(used.at("maxEdge").get<double>(), 0.5);
+
+  EXPECT_EQ(json.at("entityTriangleCount").at("wall-north").get<std::size_t>(),
+            1U);
+}
+
+TEST(Io, WriteMeshReportWritesReadableFile) {
+  const av::SurfaceMeshResult result = makeSurfaceResult();
+  av::ResolvedSurfaceMeshSettings settings;
+  settings.targetEdge = 0.5;
+  settings.maxEdge = 1.0;
+
+  const std::filesystem::path path = tempPath("mesh-report.json");
+  av::writeMeshReport(path, av::meshReportFrom(result, settings));
+  std::ifstream input(path);
+  const nlohmann::json json = nlohmann::json::parse(input);
+  EXPECT_EQ(json.at("kind").get<std::string>(), "surface");
+  EXPECT_EQ(json.at("stats").at("triangles").get<std::size_t>(), 1U);
+  EXPECT_DOUBLE_EQ(json.at("settingsUsed").at("targetEdge").get<double>(), 0.5);
+  std::filesystem::remove(path);
+}

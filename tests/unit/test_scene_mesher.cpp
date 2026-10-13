@@ -135,6 +135,16 @@ bool hasWarningContaining(const av::SurfaceMeshResult& result,
   return false;
 }
 
+bool hasVolumeWarningContaining(const av::VolumeMeshResult& result,
+                                const std::string& needle) {
+  for (const std::string& warning : result.warnings) {
+    if (warning.find(needle) != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 TEST(SceneMesher, WallWithoutOpeningsIsTwelveTriangles) {
@@ -330,4 +340,38 @@ TEST(SceneMesher, AdvancingFrontFallsBackWithWarning) {
   const av::SurfaceMeshResult result = av::generateSurfaceMesh(scene, settings);
   EXPECT_EQ(result.mesh.triangles.size(), 12u);
   EXPECT_TRUE(hasWarningContaining(result, "advancing-front"));
+}
+
+TEST(SceneMesher, VolumeStubHexBoxEmitsOneCellPerSolidBox) {
+  av::Scene scene;
+  scene.entities.push_back(makeSolidBox());
+  av::MeshSettings settings = scene.meshSettings;
+  settings.volume.algorithm = av::MeshSettings::VolumeAlgorithm::HexBox;
+
+  const av::VolumeMeshResult result = av::generateVolumeMesh(scene, settings);
+  EXPECT_EQ(result.nodes.size(), 8u);
+  ASSERT_EQ(result.cells.size(), 1u);
+  ASSERT_EQ(result.zones.size(), 1u);
+  EXPECT_EQ(result.zones[0], "mat-brick");
+  EXPECT_EQ(result.cells[0][0], 0u);
+  EXPECT_EQ(result.cells[0][7], 7u);
+  EXPECT_TRUE(hasVolumeWarningContaining(result, "v1 stub"));
+}
+
+TEST(SceneMesher, VolumeStubTetAndNonBoxGeometryWarn) {
+  av::Scene scene = makeScene();
+  av::MeshSettings settings = scene.meshSettings;
+  settings.volume.algorithm = av::MeshSettings::VolumeAlgorithm::Tet;
+
+  const av::VolumeMeshResult tet = av::generateVolumeMesh(scene, settings);
+  EXPECT_TRUE(tet.cells.empty());
+  EXPECT_TRUE(hasVolumeWarningContaining(tet, "tet is not implemented"));
+
+  settings.volume.algorithm = av::MeshSettings::VolumeAlgorithm::HexBox;
+  const av::VolumeMeshResult hexes = av::generateVolumeMesh(scene, settings);
+  // Only the SolidBox produces a cell; wall / extrude / void warn and skip.
+  EXPECT_EQ(hexes.cells.size(), 1u);
+  EXPECT_TRUE(hasVolumeWarningContaining(hexes, "wall 'wall-door'"));
+  EXPECT_TRUE(hasVolumeWarningContaining(hexes, "solid_extrude 'l-wall'"));
+  EXPECT_TRUE(hasVolumeWarningContaining(hexes, "void 'void-1'"));
 }

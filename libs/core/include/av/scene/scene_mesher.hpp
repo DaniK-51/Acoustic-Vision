@@ -1,6 +1,8 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -58,5 +60,24 @@ struct SurfaceMeshResult {
 // thrown — run validateScene() first for strict checking.
 [[nodiscard]] SurfaceMeshResult generateSurfaceMesh(const Scene& scene,
                                                     const MeshSettings& settings);
+
+// Output of generateVolumeMesh (slice R8 stub).
+struct VolumeMeshResult {
+  std::vector<Vec3> nodes;
+  // Hex cells (8 node indices each); empty in the v1 stub except one cell
+  // per SolidBox under algorithm hex-box.
+  std::vector<std::array<std::uint32_t, 8>> cells;
+  // Zone (material id) per cell; same length as `cells`.
+  std::vector<std::string> zones;
+  std::vector<std::string> warnings;
+};
+
+// Volume mesh stub (docs/room-editor-mesh.md §3.3, slice R8) — not a real
+// volume mesher. Algorithm hex-box emits one hex cell per SolidBox (8 corner
+// nodes, zone = materialId); other geometry entities are skipped with a
+// warning and `targetSize` is not applied. Algorithm tet produces no cells
+// and warns. Callers decide when to run this via meshSettings.volume.enabled.
+[[nodiscard]] VolumeMeshResult generateVolumeMesh(const Scene& scene,
+                                                  const MeshSettings& settings);
 
 }  // namespace av

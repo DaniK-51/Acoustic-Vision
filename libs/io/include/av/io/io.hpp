@@ -12,6 +12,7 @@
 #include <av/geometry/mesh.hpp>
 #include <av/metrics/metrics.hpp>
 #include <av/scenario/scenario.hpp>
+#include <av/scene/scene_mesher.hpp>
 #include <av/scene/scene_model.hpp>
 
 namespace av {
@@ -35,6 +36,34 @@ void saveScenario(const Scenario& scenario, const std::filesystem::path& path);
 // File helpers; throw std::runtime_error on IO or parse failure.
 [[nodiscard]] Scene loadScene(const std::filesystem::path& path);
 void saveScene(const Scene& scene, const std::filesystem::path& path);
+
+// mesh-report.json (docs/room-editor-mesh.md §3.4, slice R8): generation
+// stats for the GUI/API bottom sheet and CLI --report.
+struct MeshReport {
+  std::string kind = "surface";  // "surface" | "volume"
+  struct Stats {
+    std::size_t vertices = 0;
+    std::size_t triangles = 0;
+    // Zone / material-slot names present on the mesh.
+    std::vector<std::string> zones;
+  } stats;
+  // [[min], [max]] of all positions; zero box at origin for an empty mesh.
+  Aabb bbox{};
+  std::vector<std::string> warnings;
+  ResolvedSurfaceMeshSettings settingsUsed{};
+  // entity id -> contributed triangles (picking trace).
+  std::map<std::string, std::size_t> entityTriangleCount;
+};
+
+// Fills MeshReport from generateSurfaceMesh output + the resolved settings
+// that were (or would be) handed to the mesher.
+[[nodiscard]] MeshReport meshReportFrom(
+    const SurfaceMeshResult& result,
+    const ResolvedSurfaceMeshSettings& settingsUsed);
+
+[[nodiscard]] nlohmann::json meshReportToJson(const MeshReport& report);
+void writeMeshReport(const std::filesystem::path& path,
+                     const MeshReport& report);
 
 // Wavefront OBJ export (gen-mesh). Writes v / g / usemtl / f lines, one
 // `g`+`usemtl` pair per materialSlots entry (floor, ceiling, walls for

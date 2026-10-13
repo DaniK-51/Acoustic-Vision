@@ -446,4 +446,60 @@ SurfaceMeshResult generateSurfaceMesh(const Scene& scene,
   return result;
 }
 
+VolumeMeshResult generateVolumeMesh(const Scene& scene,
+                                    const MeshSettings& settings) {
+  VolumeMeshResult result;
+  result.warnings.push_back(
+      "volume mesh is a v1 stub (docs/room-editor-mesh.md §3.3); "
+      "hex-box emits one cell per solid_box, targetSize is not applied");
+  if (settings.volume.algorithm == MeshSettings::VolumeAlgorithm::Tet) {
+    result.warnings.push_back(
+        "meshSettings.volume.algorithm tet is not implemented in v1; no cells");
+    return result;
+  }
+
+  for (const SceneEntity& entity : scene.entities) {
+    const std::string& id = entityId(entity);
+    if (const auto* box = std::get_if<SolidBox>(&entity)) {
+      if (!(box->size.x > 0.0) || !(box->size.y > 0.0) ||
+          !(box->size.z > 0.0)) {
+        result.warnings.push_back("solid_box " + quoted(id) +
+                                  ": skipped (size must be positive in all "
+                                  "axes)");
+        continue;
+      }
+      const double x0 = box->origin.x;
+      const double y0 = box->origin.y;
+      const double z0 = box->origin.z;
+      const double x1 = x0 + box->size.x;
+      const double y1 = y0 + box->size.y;
+      const double z1 = z0 + box->size.z;
+      // Bottom ring CCW seen from +Z, then the matching top ring: a single
+      // trilinear hex with outward-consistent winding for later solvers.
+      const std::uint32_t base = static_cast<std::uint32_t>(result.nodes.size());
+      result.nodes.push_back({x0, y0, z0});
+      result.nodes.push_back({x1, y0, z0});
+      result.nodes.push_back({x1, y1, z0});
+      result.nodes.push_back({x0, y1, z0});
+      result.nodes.push_back({x0, y0, z1});
+      result.nodes.push_back({x1, y0, z1});
+      result.nodes.push_back({x1, y1, z1});
+      result.nodes.push_back({x0, y1, z1});
+      result.cells.push_back({base + 0, base + 1, base + 2, base + 3, base + 4,
+                              base + 5, base + 6, base + 7});
+      result.zones.push_back(box->materialId);
+    } else if (const auto* wall = std::get_if<Wall>(&entity)) {
+      result.warnings.push_back("wall " + quoted(wall->id) +
+                                ": no volume cells in the v1 stub");
+    } else if (const auto* extrude = std::get_if<SolidExtrude>(&entity)) {
+      result.warnings.push_back("solid_extrude " + quoted(extrude->id) +
+                                ": no volume cells in the v1 stub");
+    } else if (std::holds_alternative<Void>(entity)) {
+      result.warnings.push_back("void " + quoted(id) +
+                                ": no volume cells in the v1 stub");
+    }
+  }
+  return result;
+}
+
 }  // namespace av

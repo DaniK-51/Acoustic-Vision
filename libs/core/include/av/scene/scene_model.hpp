@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -99,8 +100,11 @@ struct MeshSettings {
 
   struct Surface {
     SurfaceAlgorithm algorithm = SurfaceAlgorithm::Auto;
-    double targetEdge = 0.5;
-    double maxEdge = 1.0;
+    // Optional custom overrides (schemas/scene.schema.json). Unset fields are
+    // filled from the `quality` preset by resolveSurfaceMeshSettings; a value
+    // that is set wins over the preset for that field.
+    std::optional<double> targetEdge;
+    std::optional<double> maxEdge;
     Quality quality = Quality::Draft;
   };
 
@@ -113,6 +117,24 @@ struct MeshSettings {
   Surface surface;
   Volume volume;
 };
+
+// Concrete surface parameters a mesher should use (docs/room-editor-mesh.md
+// §3.2, slice R8).
+struct ResolvedSurfaceMeshSettings {
+  double targetEdge = 0.5;
+  double maxEdge = 1.0;
+  MeshSettings::SurfaceAlgorithm algorithm = MeshSettings::SurfaceAlgorithm::Auto;
+};
+
+// Expands `meshSettings.surface.quality` into (targetEdge, maxEdge) and
+// carries `algorithm` through. Preset table (docs/room-editor-mesh.md §3.2):
+//   draft    -> targetEdge 0.5,  maxEdge 1.0
+//   standard -> targetEdge 0.2,  maxEdge 0.5
+//   fine     -> targetEdge 0.08, maxEdge 0.2
+// An explicitly set targetEdge / maxEdge in MeshSettings::Surface overrides
+// the preset for that field; the preset fills the rest.
+[[nodiscard]] ResolvedSurfaceMeshSettings resolveSurfaceMeshSettings(
+    const MeshSettings& settings);
 
 // Scene document (schemas/scene.schema.json). Units are meters only.
 struct Scene {

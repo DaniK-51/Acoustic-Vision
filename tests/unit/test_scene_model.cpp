@@ -202,8 +202,10 @@ TEST(SceneModel, JsonRoundTrip) {
 
   EXPECT_EQ(back.meshSettings.surface.algorithm,
             av::MeshSettings::SurfaceAlgorithm::Earclip);
-  EXPECT_DOUBLE_EQ(back.meshSettings.surface.targetEdge, 0.2);
-  EXPECT_DOUBLE_EQ(back.meshSettings.surface.maxEdge, 0.5);
+  ASSERT_TRUE(back.meshSettings.surface.targetEdge.has_value());
+  ASSERT_TRUE(back.meshSettings.surface.maxEdge.has_value());
+  EXPECT_DOUBLE_EQ(*back.meshSettings.surface.targetEdge, 0.2);
+  EXPECT_DOUBLE_EQ(*back.meshSettings.surface.maxEdge, 0.5);
   EXPECT_EQ(back.meshSettings.surface.quality, av::MeshSettings::Quality::Standard);
   EXPECT_EQ(back.meshSettings.volume.algorithm,
             av::MeshSettings::VolumeAlgorithm::HexBox);
@@ -359,4 +361,51 @@ TEST(SceneModel, ParseRejectsUnknownTypeAndBadOpening) {
 TEST(SceneModel, LoadMissingFileThrows) {
   EXPECT_THROW(av::loadScene(tempPath("does-not-exist.json")),
                std::runtime_error);
+}
+
+TEST(SceneModel, ResolveSurfaceMeshSettingsQualityPresets) {
+  av::MeshSettings settings;
+
+  settings.surface.quality = av::MeshSettings::Quality::Draft;
+  av::ResolvedSurfaceMeshSettings draft = av::resolveSurfaceMeshSettings(settings);
+  EXPECT_DOUBLE_EQ(draft.targetEdge, 0.5);
+  EXPECT_DOUBLE_EQ(draft.maxEdge, 1.0);
+  EXPECT_EQ(draft.algorithm, av::MeshSettings::SurfaceAlgorithm::Auto);
+
+  settings.surface.quality = av::MeshSettings::Quality::Standard;
+  av::ResolvedSurfaceMeshSettings standard =
+      av::resolveSurfaceMeshSettings(settings);
+  EXPECT_DOUBLE_EQ(standard.targetEdge, 0.2);
+  EXPECT_DOUBLE_EQ(standard.maxEdge, 0.5);
+
+  settings.surface.quality = av::MeshSettings::Quality::Fine;
+  av::ResolvedSurfaceMeshSettings fine = av::resolveSurfaceMeshSettings(settings);
+  EXPECT_DOUBLE_EQ(fine.targetEdge, 0.08);
+  EXPECT_DOUBLE_EQ(fine.maxEdge, 0.2);
+}
+
+TEST(SceneModel, ResolveSurfaceMeshSettingsExplicitOverridesWin) {
+  av::MeshSettings settings;
+  settings.surface.quality = av::MeshSettings::Quality::Fine;
+  settings.surface.targetEdge = 0.15;
+  settings.surface.algorithm = av::MeshSettings::SurfaceAlgorithm::Earclip;
+
+  const av::ResolvedSurfaceMeshSettings resolved =
+      av::resolveSurfaceMeshSettings(settings);
+  // targetEdge is explicit -> wins; maxEdge is unset -> preset (fine = 0.2).
+  EXPECT_DOUBLE_EQ(resolved.targetEdge, 0.15);
+  EXPECT_DOUBLE_EQ(resolved.maxEdge, 0.2);
+  EXPECT_EQ(resolved.algorithm, av::MeshSettings::SurfaceAlgorithm::Earclip);
+}
+
+TEST(SceneModel, UnsetEdgesStayUnsetAcrossJson) {
+  av::Scene scene = makeScene();
+  scene.meshSettings.surface.targetEdge.reset();
+  scene.meshSettings.surface.maxEdge.reset();
+  const nlohmann::json json = av::sceneToJson(scene);
+  EXPECT_FALSE(json.at("meshSettings").at("surface").contains("targetEdge"));
+  EXPECT_FALSE(json.at("meshSettings").at("surface").contains("maxEdge"));
+  const av::Scene back = av::sceneFromJson(json);
+  EXPECT_FALSE(back.meshSettings.surface.targetEdge.has_value());
+  EXPECT_FALSE(back.meshSettings.surface.maxEdge.has_value());
 }

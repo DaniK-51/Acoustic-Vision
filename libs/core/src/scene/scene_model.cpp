@@ -127,14 +127,15 @@ void validateVoid(const Void& voidEntity, std::vector<std::string>& errors) {
 
 void validateMeshSettings(const MeshSettings& settings,
                           std::vector<std::string>& errors) {
-  if (!(settings.surface.targetEdge > 0.0)) {
+  const ResolvedSurfaceMeshSettings resolved = resolveSurfaceMeshSettings(settings);
+  if (!(resolved.targetEdge > 0.0)) {
     errors.push_back("meshSettings.surface.targetEdge must be positive");
   }
-  if (!(settings.surface.maxEdge > 0.0)) {
+  if (!(resolved.maxEdge > 0.0)) {
     errors.push_back("meshSettings.surface.maxEdge must be positive");
   }
-  if (settings.surface.targetEdge > 0.0 && settings.surface.maxEdge > 0.0 &&
-      settings.surface.targetEdge > settings.surface.maxEdge) {
+  if (resolved.targetEdge > 0.0 && resolved.maxEdge > 0.0 &&
+      resolved.targetEdge > resolved.maxEdge) {
     errors.push_back(
         "meshSettings.surface.targetEdge must not exceed maxEdge");
   }
@@ -144,6 +145,36 @@ void validateMeshSettings(const MeshSettings& settings,
 }
 
 }  // namespace
+
+ResolvedSurfaceMeshSettings resolveSurfaceMeshSettings(
+    const MeshSettings& settings) {
+  // Preset table from docs/room-editor-mesh.md §3.2; explicit targetEdge /
+  // maxEdge in the settings win per field over the preset pair.
+  ResolvedSurfaceMeshSettings resolved;
+  switch (settings.surface.quality) {
+    case MeshSettings::Quality::Standard:
+      resolved.targetEdge = 0.2;
+      resolved.maxEdge = 0.5;
+      break;
+    case MeshSettings::Quality::Fine:
+      resolved.targetEdge = 0.08;
+      resolved.maxEdge = 0.2;
+      break;
+    case MeshSettings::Quality::Draft:
+    default:
+      resolved.targetEdge = 0.5;
+      resolved.maxEdge = 1.0;
+      break;
+  }
+  if (settings.surface.targetEdge.has_value()) {
+    resolved.targetEdge = *settings.surface.targetEdge;
+  }
+  if (settings.surface.maxEdge.has_value()) {
+    resolved.maxEdge = *settings.surface.maxEdge;
+  }
+  resolved.algorithm = settings.surface.algorithm;
+  return resolved;
+}
 
 std::string_view entityType(const SceneEntity& entity) {
   struct Visitor {

@@ -114,11 +114,11 @@ V0.2 **не ломает** `scenario.schema.json`. Вводим **parallel docum
 | Поле | Диапазон | Смысл |
 |------|----------|--------|
 | `algorithm` | auto / earclip / advancing-front | алгоритм |
-| `targetEdge` | м | целевое ребро |
-| `maxEdge` | м | жёсткий потолок |
+| `targetEdge` | м | целевое ребро (опционально; явное значение важнее пресета) |
+| `maxEdge` | м | жёсткий потолок (опционально; явное значение важнее пресета) |
 | `quality` | draft / standard / fine | пресет → (targetEdge, maxEdge) |
-| `preserveCorners` | bool | не сглаживать углы |
-| `weldEpsilon` | м | склейка вершин |
+
+Поля `preserveCorners` / `weldEpsilon` — **не в v1** (omit v1): явная топология без сглаживания углов и склейки вершин.
 
 **Пресеты quality:**
 
@@ -137,7 +137,7 @@ VolumeMeshSettings { algorithm: tet | hex-box, targetSize, enabled }
 generateVolumeMesh(scene) → { cells, nodes, zones }  // stub v1
 ```
 
-V0.2: **API + schema + пустой/box-only tet** (для hex-box комнаты), чтобы UX и data model были готовы. Полноценные tets — следующая итерация (TetGen/Netgen-подобное не тащим в v1).
+V0.2: **API + schema + box-only hex-box stub** (одна hex-ячейка на `SolidBox`; остальная геометрия и `algorithm: tet` — предупреждение и ноль ячеек). Полноценные tets — следующая итерация (TetGen/Netgen-подобное не тащим в v1).
 
 ### 3.4. Инспекция mesh
 
