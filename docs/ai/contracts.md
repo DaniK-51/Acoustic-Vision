@@ -155,13 +155,16 @@ Populated kinds follow the engine's `artifacts` list.
     "0":   { ... }
   },
   "edt": { "0": 0.05 },
-  "earlyReflections": [ { "t": 0.012, "amp": 0.4, "order": 1 } ]
+  "earlyReflections": [ { "t": 0.012, "amp": 0.4, "order": 0 } ]
 }
 ```
 
 Band keys are band center Hz as strings; **key `"0"` is broadband** (derived
 from a broadband IR). `schroederT30` is 0 when there is no IR (analytic
-engines fill only `sabine`/`eyring`).
+engines fill only `sabine`/`eyring`). `order` is **0 = unknown** for the
+peak-picked early reflections every built-in engine produces today
+(`earlyReflections()` in `metrics.cpp`); a non-zero value would come from an
+engine that knows the bounce count.
 
 ### IR (`IrBuffer`)
 

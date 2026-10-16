@@ -22,8 +22,9 @@
 | 3 | `docs/engines.md` | Контракт Engine API и модель плагинов |
 | 4 | `schemas/*.json` | Формальный контракт Scenario / EngineDescriptor |
 | 5 | `README.md` | Краткий обзор для человека |
+| — | `docs/ai/` | **Deep code reference for AI agents** (English): architecture, contracts, engines, mesh/scene, API, workflows, gotchas. Code-level detail lives here; start at `docs/ai/README.md` |
 
-При противоречии: идея → архитектура → engines → schemas. После изменения **обновить все затронутые документы в одном заходе**.
+При противоречии: идея → архитектура → engines → schemas. После изменения **обновить все затронутые документы в одном заходе**. Если расходятся `docs/ai/` и код — код прав, править `docs/ai/`.
 
 **Для AI-агентов:** полный англоязычный справочник по коду — `docs/ai/` (архитектура, контракты, engines, mesh/scene, API, workflows, gotchas). Начинать с `docs/ai/README.md`.
 

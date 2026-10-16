@@ -68,7 +68,7 @@ rejected. Because engines live in a static library, binaries must call
 | `supportsMesh` | accepts `Room::Type::Mesh` with `loadedMesh` |
 | `supportsRayPaths` | can fill `Result.rays` |
 | `supportsBands` | per-band metrics |
-| `maxOrder` | 0 = N/A (mesh/RT engines), otherwise max reflection order |
+| `maxOrder` | 0 = N/A. All four built-in engines report **0** today (including `image-source`, which still honors `params.maxReflectionOrder`); a non-zero value would advertise a hard order cap for a future engine |
 
 `artifacts` is the subset of `{"ir","metrics","field","rays","findings"}` the
 engine actually produces. GUI/API render only advertised kinds. Today no

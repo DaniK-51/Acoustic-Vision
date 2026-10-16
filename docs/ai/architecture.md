@@ -28,7 +28,7 @@ tests/integration  # api_smoke.py, cli_field_smoke.py
 | `av_core` | (nlohmann_json only) | `av_io`, `av_sim`, Crow |
 | `av_io` | `av_core` | `av_sim` |
 | `av_sim` | `av_core` | `av_io` (jobs stay IO-free) |
-| `av-cli` | `av_io`, `av_core`, `av_sim` | Crow |
+| `av-cli` | `av_io` (pulled in: `av_core`) | `av_sim`, Crow |
 | `av-api` | `av_sim`, `av_io`, `av_core`, Crow | — |
 
 Disk loading of `room.mesh.uri` happens at the CLI/API boundary via
