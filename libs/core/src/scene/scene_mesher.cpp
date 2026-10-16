@@ -234,101 +234,112 @@ void addWall(const Wall& wall, const std::vector<const Void*>& voids,
     if (cutOuter) {
       holes[1].push_back(hole);
     }
+    const std::string faces =
+        cutInner && cutOuter ? "inner and outer faces"
+                             : (cutInner ? "inner face" : "outer face");
     warnings.push_back("wall " + quoted(wall.id) + ": void " +
-                       quoted(voidEntity->id) +
-                       " cut as a simple hole without reveal faces (v1)");
+                       quoted(voidEntity->id) + " cut " + faces +
+                       " as a simple hole without reveal faces (v1)");
   }
 
-  // Grid split of the inner/outer faces around the holes. Breaks strictly
-  // inside the face rectangle become grid lines; 0 / L / 0 / H are implicit.
-  std::vector<double> sBreaks{0.0, frame.length};
-  std::vector<double> zBreaks{0.0, frame.height};
-  const auto addBreaks = [&](const std::vector<FaceHole>& faceHoles) {
-    for (const FaceHole& hole : faceHoles) {
+  // Per-face grid split around that face's holes (each face keeps its own
+  // break lines, so a one-sided hole does not subdivide the opposite face).
+  // Breaks strictly inside the face rectangle become grid lines; 0 / L / 0 / H
+  // are implicit.
+  std::vector<double> sBreaks[2];
+  std::vector<double> zBreaks[2];
+  for (int side = 0; side < 2; ++side) {
+    sBreaks[side] = {0.0, frame.length};
+    zBreaks[side] = {0.0, frame.height};
+    for (const FaceHole& hole : holes[side]) {
       if (hole.s0 > kEps && hole.s0 < frame.length - kEps) {
-        sBreaks.push_back(hole.s0);
+        sBreaks[side].push_back(hole.s0);
       }
       if (hole.s1 > kEps && hole.s1 < frame.length - kEps) {
-        sBreaks.push_back(hole.s1);
+        sBreaks[side].push_back(hole.s1);
       }
       if (hole.z0 > kEps && hole.z0 < frame.height - kEps) {
-        zBreaks.push_back(hole.z0);
+        zBreaks[side].push_back(hole.z0);
       }
       if (hole.z1 > kEps && hole.z1 < frame.height - kEps) {
-        zBreaks.push_back(hole.z1);
+        zBreaks[side].push_back(hole.z1);
       }
     }
-  };
-  addBreaks(holes[0]);
-  addBreaks(holes[1]);
-  std::sort(sBreaks.begin(), sBreaks.end());
-  std::sort(zBreaks.begin(), zBreaks.end());
-  sBreaks.erase(std::unique(sBreaks.begin(), sBreaks.end(),
-                           [](double a, double b) {
-                             return std::abs(a - b) <= kEps;
-                           }),
-                sBreaks.end());
-  zBreaks.erase(std::unique(zBreaks.begin(), zBreaks.end(),
-                           [](double a, double b) {
-                             return std::abs(a - b) <= kEps;
-                           }),
-                zBreaks.end());
+    const auto closer = [](double a, double b) { return std::abs(a - b) <= kEps; };
+    std::sort(sBreaks[side].begin(), sBreaks[side].end());
+    std::sort(zBreaks[side].begin(), zBreaks[side].end());
+    sBreaks[side].erase(std::unique(sBreaks[side].begin(), sBreaks[side].end(), closer),
+                        sBreaks[side].end());
+    zBreaks[side].erase(std::unique(zBreaks[side].begin(), zBreaks[side].end(), closer),
+                        zBreaks[side].end());
+  }
 
-  const std::size_t nS = sBreaks.size();
-  const std::size_t nZ = zBreaks.size();
-  // Corner table (s-index, z-index, side 0=inner 1=outer) shared by faces
-  // and caps so a plain wall is 8 vertices, not 24.
+  // Corner table per side (s-index, z-index); shared across grid cells so a
+  // plain wall is 8 vertices, not 24.
   constexpr std::uint32_t kUnset = 0xFFFFFFFFu;
-  std::vector<std::uint32_t> corners(nS * nZ * 2, kUnset);
-  const auto corner = [&](std::size_t is, std::size_t iz, int side) {
-    const std::size_t index = (is * nZ + iz) * 2 + static_cast<std::size_t>(side);
-    if (corners[index] == kUnset) {
+  std::array<std::size_t, 2> nS{};
+  std::array<std::size_t, 2> nZ{};
+  std::vector<std::uint32_t> corners[2];
+  for (int side = 0; side < 2; ++side) {
+    nS[side] = sBreaks[side].size();
+    nZ[side] = zBreaks[side].size();
+    corners[side].assign(nS[side] * nZ[side], kUnset);
+  }
+  const auto corner = [&](int side, std::size_t is, std::size_t iz) {
+    const std::size_t index = is * nZ[side] + iz;
+    if (corners[side][index] == kUnset) {
       const double t = side == 0 ? 0.0 : frame.thickness;
-      corners[index] =
-          mesher.vertex(frame.at(sBreaks[is], zBreaks[iz], t));
+      corners[side][index] = mesher.vertex(
+          frame.at(sBreaks[side][is], zBreaks[side][iz], t));
     }
-    return corners[index];
+    return corners[side][index];
   };
 
   const std::string innerZone =
       zoneName(wall.faces.inner, wall.id + "-inner");
   const std::string outerZone =
       zoneName(wall.faces.outer, wall.id + "-outer");
-  for (std::size_t iz = 0; iz + 1 < nZ; ++iz) {
-    for (std::size_t is = 0; is + 1 < nS; ++is) {
-      const double sMid = 0.5 * (sBreaks[is] + sBreaks[is + 1]);
-      const double zMid = 0.5 * (zBreaks[iz] + zBreaks[iz + 1]);
-      // Inner face: normal -right (left of start->end) = into the room for a
-      // CCW wall loop.
-      if (!insideAnyHole(sMid, zMid, holes[0])) {
-        mesher.quad(corner(is, iz, 0), corner(is, iz + 1, 0),
-                    corner(is + 1, iz + 1, 0), corner(is + 1, iz, 0),
-                    innerZone);
-      }
-      // Outer face: normal +right.
-      if (!insideAnyHole(sMid, zMid, holes[1])) {
-        mesher.quad(corner(is, iz, 1), corner(is + 1, iz, 1),
-                    corner(is + 1, iz + 1, 1), corner(is, iz + 1, 1),
-                    outerZone);
+  for (int side = 0; side < 2; ++side) {
+    for (std::size_t iz = 0; iz + 1 < nZ[side]; ++iz) {
+      for (std::size_t is = 0; is + 1 < nS[side]; ++is) {
+        const double sMid = 0.5 * (sBreaks[side][is] + sBreaks[side][is + 1]);
+        const double zMid = 0.5 * (zBreaks[side][iz] + zBreaks[side][iz + 1]);
+        if (insideAnyHole(sMid, zMid, holes[side])) {
+          continue;
+        }
+        if (side == 0) {
+          // Inner face: normal -right (left of start->end) = into the room
+          // for a CCW wall loop.
+          mesher.quad(corner(0, is, iz), corner(0, is, iz + 1),
+                      corner(0, is + 1, iz + 1), corner(0, is + 1, iz),
+                      innerZone);
+        } else {
+          // Outer face: normal +right.
+          mesher.quad(corner(1, is, iz), corner(1, is + 1, iz),
+                      corner(1, is + 1, iz + 1), corner(1, is, iz + 1),
+                      outerZone);
+        }
       }
     }
   }
 
-  // Slab caps (openings do not cut them in v1 — see header).
+  // Slab caps (openings do not cut them in v1 — see header). Each cap spans
+  // the face extremes of both sides' grids.
   const std::string sideZone = zoneName(wall.faces.side, wall.id + "-side");
   // Bottom: normal -up.
-  mesher.quad(corner(0, 0, 0), corner(nS - 1, 0, 0), corner(nS - 1, 0, 1),
-              corner(0, 0, 1), sideZone);
+  mesher.quad(corner(0, 0, 0), corner(0, nS[0] - 1, 0),
+              corner(1, nS[1] - 1, 0), corner(1, 0, 0), sideZone);
   // Top: normal +up.
-  mesher.quad(corner(0, nZ - 1, 0), corner(0, nZ - 1, 1),
-              corner(nS - 1, nZ - 1, 1), corner(nS - 1, nZ - 1, 0),
-              sideZone);
+  mesher.quad(corner(0, 0, nZ[0] - 1), corner(1, 0, nZ[1] - 1),
+              corner(1, nS[1] - 1, nZ[1] - 1),
+              corner(0, nS[0] - 1, nZ[0] - 1), sideZone);
   // Start cap: normal -dir.
-  mesher.quad(corner(0, 0, 0), corner(0, 0, 1), corner(0, nZ - 1, 1),
-              corner(0, nZ - 1, 0), sideZone);
+  mesher.quad(corner(0, 0, 0), corner(1, 0, 0), corner(1, 0, nZ[1] - 1),
+              corner(0, 0, nZ[0] - 1), sideZone);
   // End cap: normal +dir.
-  mesher.quad(corner(nS - 1, 0, 0), corner(nS - 1, nZ - 1, 0),
-              corner(nS - 1, nZ - 1, 1), corner(nS - 1, 0, 1), sideZone);
+  mesher.quad(corner(0, nS[0] - 1, 0), corner(0, nS[0] - 1, nZ[0] - 1),
+              corner(1, nS[1] - 1, nZ[1] - 1), corner(1, nS[1] - 1, 0),
+              sideZone);
 }
 
 // ---------------------------------------------------------------------------
@@ -358,7 +369,7 @@ void addSolidBox(const SolidBox& box, EntityMesher& mesher,
   const std::uint32_t v7 = mesher.vertex({x0, y1, z1});
 
   // Outward windings (toward the air around the solid).
-  const std::string zone = zoneName(box.materialId, "solid");
+  const std::string zone = zoneName(box.materialId, box.id);
   mesher.quad(v0, v3, v2, v1, zone);  // -z
   mesher.quad(v4, v5, v6, v7, zone);  // +z
   mesher.quad(v0, v4, v7, v3, zone);  // -x
@@ -499,7 +510,7 @@ void addSolidExtrude(const SolidExtrude& extrude, EntityMesher& mesher,
     bottom[i] = mesher.vertex({polygon[i].x, polygon[i].y, 0.0});
     top[i] = mesher.vertex({polygon[i].x, polygon[i].y, extrude.height});
   }
-  const std::string zone = zoneName(extrude.materialId, "solid");
+  const std::string zone = zoneName(extrude.materialId, extrude.id);
   for (std::size_t i = 0; i < n; ++i) {
     const std::size_t j = (i + 1) % n;
     // CCW base ring -> side normals point out of the prism.
