@@ -230,3 +230,168 @@ export interface ProblemBody {
   status: number;
   detail: string;
 }
+
+// --- Room-editor Scene (V0.2, schemas/scene.schema.json) ---
+// Parallel document to Scenario; separate id space under /v1/scenes.
+
+export type Vec3 = [number, number, number];
+export type Vec2 = [number, number];
+
+export interface EditorMaterial {
+  id: string;
+  name?: string;
+  bandsHz?: number[];
+  absorption: number[];
+  scattering?: number;
+}
+
+export type WallOpeningType = 'door' | 'window';
+
+export interface WallOpening {
+  type: WallOpeningType;
+  /** Meters along the wall baseline from `start`. */
+  offset: number;
+  width: number;
+  height: number;
+  /** Height of the opening bottom above the wall base; default 0. */
+  sill?: number;
+}
+
+export interface WallFaces {
+  inner: string;
+  outer: string;
+  side: string;
+}
+
+export interface WallEntity {
+  type: 'wall';
+  id: string;
+  name?: string;
+  start: Vec3;
+  end: Vec3;
+  height: number;
+  thickness: number;
+  faces: WallFaces;
+  openings?: WallOpening[];
+}
+
+export interface SolidBoxEntity {
+  type: 'solid_box';
+  id: string;
+  name?: string;
+  origin: Vec3;
+  size: Vec3;
+  materialId: string;
+}
+
+export interface SolidExtrudeEntity {
+  type: 'solid_extrude';
+  id: string;
+  name?: string;
+  /** 2D polygon in XY, extruded along +Z by `height`. */
+  polygon: Vec2[];
+  height: number;
+  materialId: string;
+}
+
+export interface VoidEntity {
+  type: 'void';
+  id: string;
+  name?: string;
+  origin: Vec3;
+  size: Vec3;
+}
+
+export type EditorGeometryEntity =
+  | WallEntity
+  | SolidBoxEntity
+  | SolidExtrudeEntity
+  | VoidEntity;
+
+export interface EditorSourceRef {
+  type?: 'source';
+  id: string;
+  name?: string;
+  position: Vec3;
+  powerDb?: number;
+}
+
+export interface EditorReceiverRef {
+  type?: 'receiver';
+  id: string;
+  name?: string;
+  position: Vec3;
+}
+
+export type EditorEntity =
+  | EditorGeometryEntity
+  | EditorSourceRef
+  | EditorReceiverRef;
+
+export type SurfaceAlgorithm = 'auto' | 'earclip' | 'advancing-front';
+export type MeshQuality = 'draft' | 'standard' | 'fine';
+export type VolumeAlgorithm = 'tet' | 'hex-box';
+
+export interface MeshSettingsSurface {
+  algorithm?: SurfaceAlgorithm;
+  targetEdge?: number;
+  maxEdge?: number;
+  quality?: MeshQuality;
+}
+
+export interface MeshSettingsVolume {
+  algorithm?: VolumeAlgorithm;
+  targetSize?: number;
+  enabled?: boolean;
+}
+
+export interface EditorMeshSettings {
+  surface?: MeshSettingsSurface;
+  volume?: MeshSettingsVolume;
+}
+
+/** Scene document (schemas/scene.schema.json). Units are meters only. */
+export interface EditorScene {
+  schemaVersion: number;
+  id?: string;
+  units: 'm';
+  materials: EditorMaterial[];
+  entities: EditorEntity[];
+  sources?: EditorSourceRef[];
+  receivers?: EditorReceiverRef[];
+  meshSettings?: EditorMeshSettings;
+}
+
+export interface CreateEditorSceneResponse {
+  sceneId: string;
+  sceneVersion: number;
+}
+
+export interface GetEditorSceneResponse extends CreateEditorSceneResponse {
+  scene: EditorScene;
+}
+
+export interface MeshReportStats {
+  vertices: number;
+  triangles: number;
+  zones: string[];
+}
+
+/** mesh-report.json / MeshReport wire shape (contracts.md §5). */
+export interface MeshReport {
+  kind: string;
+  stats: MeshReportStats;
+  bbox: number[][];
+  warnings: string[];
+  settingsUsed: Record<string, unknown>;
+  entityTriangleCount: Record<string, number>;
+}
+
+export interface EditorMeshStatus {
+  sceneId: string;
+  sceneVersion: number;
+  jobId: string;
+  state: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | string;
+  error?: string;
+  report?: MeshReport;
+}

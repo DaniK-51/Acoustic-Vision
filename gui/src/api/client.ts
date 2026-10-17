@@ -1,7 +1,11 @@
 import { apiBaseUrl } from '../config';
 import type {
+  CreateEditorSceneResponse,
   CreateSceneResponse,
+  EditorMeshStatus,
+  EditorScene,
   EngineDescriptor,
+  GetEditorSceneResponse,
   HealthResponse,
   JobResult,
   JobStatus,
@@ -179,4 +183,60 @@ export const api = {
 
   getRun: (id: string) =>
     request<RunDetail>('GET', `/runs/${encodeURIComponent(id)}`),
+
+  // --- Room-editor Scenes (/v1/scenes, separate store from /v1/scenarios) ---
+  // No list endpoint in v1 — create / get / put only.
+
+  createEditorScene: (scene: EditorScene) =>
+    request<CreateEditorSceneResponse>('POST', '/scenes', scene),
+
+  getEditorScene: (sceneId: string) =>
+    request<GetEditorSceneResponse>('GET', `/scenes/${encodeURIComponent(sceneId)}`),
+
+  /** Full-document replace (PUT and PATCH are the same handler server-side). */
+  putEditorScene: (sceneId: string, scene: EditorScene) =>
+    request<CreateEditorSceneResponse>(
+      'PUT',
+      `/scenes/${encodeURIComponent(sceneId)}`,
+      scene,
+    ),
+
+  /**
+   * Generate the surface mesh. `sync: true` runs inline and returns the
+   * finished status; otherwise `202` with state "running" and the caller
+   * polls getEditorMesh().
+   */
+  generateEditorMesh: (sceneId: string, opts: { sync?: boolean } = {}) =>
+    request<EditorMeshStatus>(
+      'POST',
+      `/scenes/${encodeURIComponent(sceneId)}/mesh${opts.sync ? '?sync=1' : ''}`,
+    ),
+
+  getEditorMesh: (sceneId: string) =>
+    request<EditorMeshStatus>('GET', `/scenes/${encodeURIComponent(sceneId)}/mesh`),
+
+  editorMeshObjUrl: (sceneId: string) =>
+    `${apiBaseUrl.replace(/\/+$/, '')}/scenes/${encodeURIComponent(sceneId)}/mesh.obj`,
+
+  downloadEditorMeshObj: async (sceneId: string, filename: string): Promise<void> => {
+    const res = await fetch(api.editorMeshObjUrl(sceneId));
+    if (!res.ok) {
+      const parsed = await parseBody(res);
+      throw toApiError(res.status, parsed);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+
+  /** Compile Scene → Scenario JSON (rect or mesh branch, room-editor-mesh.md §2.3). */
+  editorToScenario: (sceneId: string) =>
+    request<Scenario>('POST', `/scenes/${encodeURIComponent(sceneId)}/to-scenario`),
 };

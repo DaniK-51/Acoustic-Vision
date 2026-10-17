@@ -2,11 +2,16 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { api, ApiError } from './api/client';
 import type {
+  EditorEntity,
+  EditorMeshSettings,
+  EditorMeshStatus,
+  EditorScene,
   EngineDescriptor,
   HealthResponse,
   JobFieldSummary,
   JobRays,
   JobResult,
+  MeshQuality,
   RunDetail,
   RunSummary,
   Scenario,
@@ -16,13 +21,28 @@ import type {
 import { parseWavFloat32, type IrWave } from './api/wav';
 import { EventsSocket, type WsStatus } from './api/ws';
 import { apiBaseUrl } from './config';
+import {
+  addEntity,
+  createDefaultEditorScene,
+  createEmptyEditorScene,
+  findEntity,
+  makeSolidBox,
+  makeVoid,
+  makeWall,
+  makeSolidExtrude,
+  removeEntity,
+  replaceEntity,
+} from './editor-scene';
 import { formValuesFrom } from './params-schema';
 import type { ActiveJob, WorkflowStage } from './ui-types';
 import CatalogPanel from './components/CatalogPanel.vue';
 import EnginePanel from './components/EnginePanel.vue';
 import EngineParamsForm from './components/EngineParamsForm.vue';
+import EntityInspector from './components/EntityInspector.vue';
+import EntityTree from './components/EntityTree.vue';
 import LoadScenarioPanel from './components/LoadScenarioPanel.vue';
 import MaterialsPanel from './components/MaterialsPanel.vue';
+import MeshPanel from './components/MeshPanel.vue';
 import RunControls from './components/RunControls.vue';
 import RunDetailPanel from './components/RunDetail.vue';
 import RunsPanel from './components/RunsPanel.vue';
@@ -82,6 +102,20 @@ const irWaveLoading = ref(false);
 
 // --- GUI4: ray path polylines (from the same result JSON as metrics) ---
 const raysData = ref<JobRays | null>(null);
+
+// --- V0.2 room editor (Scene document, /v1/scenes) ---
+const editorScene = ref<EditorScene | null>(null);
+const editorSceneId = ref('');
+const editorSceneVersion = ref(0);
+const editorSelection = ref<string | null>(null);
+const editorBusy = ref(false);
+const editorError = ref('');
+const meshStatus = ref<EditorMeshStatus | null>(null);
+const meshGenerating = ref(false);
+const meshError = ref('');
+const toScenarioSubmitting = ref(false);
+const toScenarioError = ref('');
+let meshPollTimer: ReturnType<typeof setTimeout> | null = null;
 
 const selectedEngine = computed<EngineDescriptor | undefined>(() =>
   engines.value.find((e) => e.id === selectedEngineId.value),
@@ -527,6 +561,268 @@ function onCatalogInsert(entry: SourceCatalogEntry): void {
   void onScenarioSubmit(next);
 }
 
+// --- V0.2 room editor handlers ---
+function clearMeshPoll(): void {
+  if (meshPollTimer !== null) {
+    clearTimeout(meshPollTimer);
+    meshPollTimer = null;
+  }
+}
+
+function onEditorSelect(id: string | null): void {
+  editorSelection.value = id;
+}
+
+function onEditorAdd(kind: 'wall' | 'solid_box' | 'void' | 'solid_extrude'): void {
+  const sc = editorScene.value;
+  if (!sc) {
+    return;
+  }
+  let entity: EditorEntity;
+  switch (kind) {
+    case 'wall':
+      entity = makeWall(sc);
+      break;
+    case 'solid_box':
+      entity = makeSolidBox(sc);
+      break;
+    case 'void':
+      entity = makeVoid(sc);
+      break;
+    case 'solid_extrude':
+      entity = makeSolidExtrude(sc);
+      break;
+  }
+  editorScene.value = addEntity(sc, entity);
+  editorSelection.value = entity.id;
+  // A local edit invalidates the server mesh/report of the previous document.
+  meshStatus.value = null;
+}
+
+function onEditorDelete(id: string): void {
+  const sc = editorScene.value;
+  if (!sc) {
+    return;
+  }
+  editorScene.value = removeEntity(sc, id);
+  if (editorSelection.value === id) {
+    editorSelection.value = null;
+  }
+  meshStatus.value = null;
+}
+
+function onEditorUpdateEntity(entity: EditorEntity): void {
+  const sc = editorScene.value;
+  if (!sc) {
+    return;
+  }
+  editorScene.value = replaceEntity(sc, entity);
+  meshStatus.value = null;
+}
+
+function onEditorUpdateMeshSettings(settings: EditorMeshSettings): void {
+  const sc = editorScene.value;
+  if (!sc) {
+    return;
+  }
+  editorScene.value = { ...sc, meshSettings: settings };
+}
+
+function onEditorUpdateQuality(quality: MeshQuality): void {
+  const sc = editorScene.value;
+  if (!sc) {
+    return;
+  }
+  const base = sc.meshSettings ?? {};
+  onEditorUpdateMeshSettings({
+    ...base,
+    surface: { ...(base.surface ?? {}), quality },
+  });
+}
+
+function onEditorNewScene(): void {
+  clearMeshPoll();
+  editorScene.value = createDefaultEditorScene();
+  editorSceneId.value = '';
+  editorSceneVersion.value = 0;
+  editorSelection.value = null;
+  editorError.value = '';
+  meshStatus.value = null;
+  meshError.value = '';
+}
+
+function onEditorEmptyScene(): void {
+  clearMeshPoll();
+  editorScene.value = createEmptyEditorScene();
+  editorSceneId.value = '';
+  editorSceneVersion.value = 0;
+  editorSelection.value = null;
+  editorError.value = '';
+  meshStatus.value = null;
+  meshError.value = '';
+}
+
+async function onEditorSave(): Promise<void> {
+  const sc = editorScene.value;
+  if (!sc || editorBusy.value) {
+    return;
+  }
+  editorBusy.value = true;
+  editorError.value = '';
+  try {
+    if (editorSceneId.value) {
+      const res = await api.putEditorScene(editorSceneId.value, sc);
+      editorSceneId.value = res.sceneId;
+      editorSceneVersion.value = res.sceneVersion;
+      // PUT drops any previously generated mesh/report server-side.
+      meshStatus.value = null;
+    } else {
+      const res = await api.createEditorScene(sc);
+      editorSceneId.value = res.sceneId;
+      editorSceneVersion.value = res.sceneVersion;
+    }
+  } catch (err) {
+    editorError.value = errText(err);
+  } finally {
+    editorBusy.value = false;
+  }
+}
+
+async function onEditorLoad(sceneId: string): Promise<void> {
+  if (editorBusy.value) {
+    return;
+  }
+  editorBusy.value = true;
+  editorError.value = '';
+  clearMeshPoll();
+  try {
+    const loaded = await api.getEditorScene(sceneId);
+    editorScene.value = loaded.scene;
+    editorSceneId.value = loaded.sceneId;
+    editorSceneVersion.value = loaded.sceneVersion;
+    editorSelection.value = null;
+    meshStatus.value = null;
+    meshError.value = '';
+    // Best-effort: show the current mesh state if one was generated earlier.
+    try {
+      meshStatus.value = await api.getEditorMesh(loaded.sceneId);
+    } catch {
+      meshStatus.value = null;
+    }
+  } catch (err) {
+    editorError.value = errText(err);
+  } finally {
+    editorBusy.value = false;
+  }
+}
+
+function pollMeshStatus(): void {
+  clearMeshPoll();
+  const id = editorSceneId.value;
+  if (!id) {
+    return;
+  }
+  meshPollTimer = setTimeout(async () => {
+    try {
+      const status = await api.getEditorMesh(id);
+      if (editorSceneId.value !== id) {
+        return;
+      }
+      meshStatus.value = status;
+      if (status.state === 'queued' || status.state === 'running') {
+        pollMeshStatus();
+      }
+    } catch (err) {
+      if (editorSceneId.value === id) {
+        meshError.value = errText(err);
+        meshGenerating.value = false;
+      }
+    }
+  }, 400);
+}
+
+async function onEditorGenerateMesh(): Promise<void> {
+  if (!editorScene.value || meshGenerating.value) {
+    return;
+  }
+  // Persist local edits first (POST when there is no server id yet) so the
+  // mesher always sees the current document.
+  await onEditorSave();
+  if (editorError.value || !editorSceneId.value) {
+    return;
+  }
+  meshGenerating.value = true;
+  meshError.value = '';
+  try {
+    const status = await api.generateEditorMesh(editorSceneId.value);
+    meshStatus.value = status;
+    if (status.state === 'queued' || status.state === 'running') {
+      pollMeshStatus();
+    }
+  } catch (err) {
+    meshError.value = errText(err);
+  } finally {
+    meshGenerating.value = false;
+  }
+}
+
+async function onEditorDownloadObj(): Promise<void> {
+  const id = editorSceneId.value;
+  if (!id) {
+    return;
+  }
+  try {
+    await api.downloadEditorMeshObj(id, `mesh-${id}.obj`);
+  } catch (err) {
+    meshError.value = errText(err);
+  }
+}
+
+/**
+ * «В расчёт»: compile the editor Scene → Scenario (to-scenario), store it via
+ * the existing POST /v1/scenarios path, then submit a simulation with the
+ * current engine/methodParams — the normal Run pipeline.
+ */
+async function onEditorToScenario(): Promise<void> {
+  if (!editorScene.value || toScenarioSubmitting.value || jobRunning.value) {
+    return;
+  }
+  // Mesh generation and to-scenario both read the stored document — persist first.
+  await onEditorSave();
+  if (editorError.value || !editorSceneId.value) {
+    return;
+  }
+  toScenarioSubmitting.value = true;
+  toScenarioError.value = '';
+  try {
+    const compiled = await api.editorToScenario(editorSceneId.value);
+    await onScenarioSubmit(compiled);
+    if (loadError.value) {
+      toScenarioError.value = loadError.value;
+      return;
+    }
+    await onRun();
+    if (submitError.value) {
+      toScenarioError.value = submitError.value;
+    } else {
+      stage.value = 'run';
+    }
+  } catch (err) {
+    toScenarioError.value = errText(err);
+  } finally {
+    toScenarioSubmitting.value = false;
+  }
+}
+
+const selectedEditorEntity = computed(() =>
+  findEntity(editorScene.value, editorSelection.value),
+);
+
+const canEditorGenerate = computed(() => Boolean(editorScene.value));
+const canEditorSubmit = computed(
+  () => Boolean(editorScene.value) && !jobRunning.value,
+);
+
 // --- WS job fan-out → status bar ---
 let socket: EventsSocket | null = null;
 let healthTimer: ReturnType<typeof setInterval> | null = null;
@@ -610,6 +906,7 @@ onBeforeUnmount(() => {
     clearInterval(healthTimer);
     healthTimer = null;
   }
+  clearMeshPoll();
   socket?.close();
   socket = null;
 });
@@ -626,115 +923,189 @@ onBeforeUnmount(() => {
 
     <div class="workspace">
       <aside class="col left">
-        <section class="stage-section" :data-active="stage === 'scene'">
+        <!-- V0.2 room editor: entity tree + scene document I/O -->
+        <section v-if="stage === 'editor'" class="stage-section" data-active="true">
           <header class="stage-label">
-            <span class="stage-no">1</span> Scene
+            <span class="stage-no">E</span> Room editor
           </header>
-          <LoadScenarioPanel
-            :loading="loadLoading"
-            :error="loadError"
-            :scene-id="sceneId"
-            :scene-version="sceneVersion"
-            @submit="onScenarioSubmit"
+          <EntityTree
+            :scene="editorScene"
+            :selected-id="editorSelection"
+            :scene-id="editorSceneId"
+            :scene-version="editorSceneVersion"
+            :saving="editorBusy"
+            :loading="editorBusy"
+            :error="editorError"
+            @select="onEditorSelect"
+            @add="onEditorAdd"
+            @delete="onEditorDelete"
+            @save="onEditorSave"
+            @load="onEditorLoad"
+            @new-scene="onEditorNewScene"
+            @clear-error="editorError = ''"
           />
-          <!-- D1: catalog is scene-stage only, never in the compute zone -->
-          <CatalogPanel
-            v-if="showCatalog"
-            :catalog="catalog"
-            :loading="catalogLoading"
-            :error="catalogError"
-            :can-insert="canCatalogInsert"
-            :insert-hint="catalogInsertHint"
-            @refresh="loadCatalog"
-            @insert="onCatalogInsert"
-          />
+          <div class="editor-extra">
+            <button class="ghost" :disabled="editorBusy" @click="onEditorEmptyScene">
+              Empty scene
+            </button>
+            <button class="ghost" :disabled="editorBusy" @click="onEditorNewScene">
+              Default shoebox
+            </button>
+          </div>
         </section>
 
-        <section class="stage-section" :data-active="stage === 'objects'">
-          <header class="stage-label">
-            <span class="stage-no">2</span> Objects / Sources
-          </header>
-          <SceneOutlinePanel
-            :scenario="scenario"
-            :scene-id="sceneId"
-            :scene-version="sceneVersion"
-          />
-          <SourceInspector
-            v-if="selectedSourceId"
-            :scenario="scenario"
-            :source-id="selectedSourceId"
-            :catalog-entries="catalog?.sources ?? []"
-            :disabled="jobRunning"
-            @orientation="onSourceOrientation"
-          />
-          <MaterialsPanel
-            :scenario="scenario"
-            :selected-face="selectedFace"
-            @select-face="onSelectFace"
-          />
-        </section>
+        <template v-else>
+          <section class="stage-section" :data-active="stage === 'scene'">
+            <header class="stage-label">
+              <span class="stage-no">1</span> Scene
+            </header>
+            <LoadScenarioPanel
+              :loading="loadLoading"
+              :error="loadError"
+              :scene-id="sceneId"
+              :scene-version="sceneVersion"
+              @submit="onScenarioSubmit"
+            />
+            <!-- D1: catalog is scene-stage only, never in the compute zone -->
+            <CatalogPanel
+              v-if="showCatalog"
+              :catalog="catalog"
+              :loading="catalogLoading"
+              :error="catalogError"
+              :can-insert="canCatalogInsert"
+              :insert-hint="catalogInsertHint"
+              @refresh="loadCatalog"
+              @insert="onCatalogInsert"
+            />
+          </section>
+
+          <section class="stage-section" :data-active="stage === 'objects'">
+            <header class="stage-label">
+              <span class="stage-no">2</span> Objects / Sources
+            </header>
+            <SceneOutlinePanel
+              :scenario="scenario"
+              :scene-id="sceneId"
+              :scene-version="sceneVersion"
+            />
+            <SourceInspector
+              v-if="selectedSourceId"
+              :scenario="scenario"
+              :source-id="selectedSourceId"
+              :catalog-entries="catalog?.sources ?? []"
+              :disabled="jobRunning"
+              @orientation="onSourceOrientation"
+            />
+            <MaterialsPanel
+              :scenario="scenario"
+              :selected-face="selectedFace"
+              @select-face="onSelectFace"
+            />
+          </section>
+        </template>
       </aside>
 
       <main class="col center">
         <Viewport
-          :scenario="scenario"
+          :scenario="stage === 'editor' ? null : scenario"
           :selection="selection"
           :field="fieldData"
           :rays="raysData"
+          :editor-scene="stage === 'editor' ? editorScene : null"
+          :editor-selection="editorSelection"
           @select="onSelect"
           @move="onEntityMove"
+          @select-editor="onEditorSelect"
         />
         <p v-if="patchError" class="error-text patch-error">{{ patchError }}</p>
       </main>
 
       <aside class="col right">
-        <section class="stage-section" :data-active="stage === 'engines'">
-          <header class="stage-label">
-            <span class="stage-no">3</span> Engines
-          </header>
-          <EnginePanel
-            v-model="selectedEngineId"
-            :engines="engines"
-            :loading="enginesLoading"
-            :error="enginesError"
-            @refresh="loadEngines"
-          />
-          <EngineParamsForm
-            :schema="selectedEngine?.paramsSchema"
-            :initial="storedMethodParams()"
-            :disabled="submitting || jobRunning"
-            v-model="methodParams"
-          />
-        </section>
+        <!-- V0.2 room editor: inspector + mesh panel -->
+        <template v-if="stage === 'editor'">
+          <section class="stage-section" data-active="true">
+            <header class="stage-label">
+              <span class="stage-no">E</span> Inspector
+            </header>
+            <EntityInspector
+              :entity="selectedEditorEntity"
+              :materials="editorScene?.materials ?? []"
+              :mesh-settings="editorScene?.meshSettings ?? null"
+              :disabled="editorBusy"
+              @update-entity="onEditorUpdateEntity"
+              @update-mesh-settings="onEditorUpdateMeshSettings"
+            />
+          </section>
+          <section class="stage-section" data-active="true">
+            <header class="stage-label">
+              <span class="stage-no">E</span> Mesh / Compute
+            </header>
+            <MeshPanel
+              :scene-id="editorSceneId"
+              :mesh-settings="editorScene?.meshSettings ?? null"
+              :mesh-status="meshStatus"
+              :generating="meshGenerating"
+              :error="meshError || toScenarioError"
+              :can-generate="canEditorGenerate"
+              :can-submit="canEditorSubmit"
+              :submitting="toScenarioSubmitting"
+              @update-quality="onEditorUpdateQuality"
+              @generate="onEditorGenerateMesh"
+              @download-obj="onEditorDownloadObj"
+              @to-scenario="onEditorToScenario"
+            />
+          </section>
+        </template>
 
-        <section class="stage-section" :data-active="stage === 'run'">
-          <header class="stage-label">
-            <span class="stage-no">4</span> Run
-          </header>
-          <RunControls
-            :has-scene="Boolean(sceneId && scenario)"
-            :running="submitting || jobRunning"
-            :can-cancel="jobRunning"
-            :engine-id="selectedEngineId"
-            :error="submitError"
-            @run="onRun"
-            @cancel="onCancel"
-          />
-        </section>
+        <template v-else>
+          <section class="stage-section" :data-active="stage === 'engines'">
+            <header class="stage-label">
+              <span class="stage-no">3</span> Engines
+            </header>
+            <EnginePanel
+              v-model="selectedEngineId"
+              :engines="engines"
+              :loading="enginesLoading"
+              :error="enginesError"
+              @refresh="loadEngines"
+            />
+            <EngineParamsForm
+              :schema="selectedEngine?.paramsSchema"
+              :initial="storedMethodParams()"
+              :disabled="submitting || jobRunning"
+              v-model="methodParams"
+            />
+          </section>
 
-        <section class="stage-section" :data-active="stage === 'results'">
-          <header class="stage-label">
-            <span class="stage-no">5</span> Results
-          </header>
-          <RunsPanel
-            :runs="runs"
-            :loading="runsLoading"
-            :error="runsError"
-            :selected-run-id="runDetail?.id ?? ''"
-            @refresh="refreshRuns"
-            @select="openRunDetail"
-          />
-        </section>
+          <section class="stage-section" :data-active="stage === 'run'">
+            <header class="stage-label">
+              <span class="stage-no">4</span> Run
+            </header>
+            <RunControls
+              :has-scene="Boolean(sceneId && scenario)"
+              :running="submitting || jobRunning"
+              :can-cancel="jobRunning"
+              :engine-id="selectedEngineId"
+              :error="submitError"
+              @run="onRun"
+              @cancel="onCancel"
+            />
+          </section>
+
+          <section class="stage-section" :data-active="stage === 'results'">
+            <header class="stage-label">
+              <span class="stage-no">5</span> Results
+            </header>
+            <RunsPanel
+              :runs="runs"
+              :loading="runsLoading"
+              :error="runsError"
+              :selected-run-id="runDetail?.id ?? ''"
+              @refresh="refreshRuns"
+              @select="openRunDetail"
+            />
+          </section>
+        </template>
       </aside>
     </div>
 
@@ -837,5 +1208,15 @@ onBeforeUnmount(() => {
 
 .center {
   overflow: hidden;
+}
+
+.editor-extra {
+  display: flex;
+  gap: 6px;
+}
+
+.editor-extra .ghost {
+  background: transparent;
+  font-size: 11px;
 }
 </style>

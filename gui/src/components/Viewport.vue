@@ -3,8 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
-import type { JobFieldSummary, JobRays, Scenario } from '../api/types';
-import { fmtBand, materialById, materialColor, surfaceBindings } from '../materials';
+import type { EditorScene, JobFieldSummary, JobRays, Scenario, Vec3 } from '../api/types';
+import { fmtBand, materialById, materialColor, surfaceBindings, kMaterialPalette } from '../materials';
+import { toThreeCoords } from '../editor-scene';
 
 // Interactive viewport: room box + source/receiver markers (rect rooms in
 // particular), click select, drag on the camera screen plane (depth toward /
@@ -38,11 +39,20 @@ const props = defineProps<{
   field: JobFieldSummary | null;
   /** Captured ray polylines from GET /jobs/{jobId}/result (null = no rays). */
   rays: JobRays | null;
+  /**
+   * Room-editor Scene (V0.2). When set, walls/boxes/voids/extrudes are drawn
+   * instead of the scenario room and become clickable via `selectEditor`.
+   * Editor geometry is Z-up; rendered Y-up via toThreeCoords.
+   */
+  editorScene?: EditorScene | null;
+  /** Selected editor entity id (from the tree or a viewport click). */
+  editorSelection?: string | null;
 }>();
 
 const emit = defineEmits<{
   select: [EntityRef | null];
   move: [EntityRef, [number, number, number]];
+  selectEditor: [id: string | null];
 }>();
 
 const container = ref<HTMLDivElement | null>(null);
@@ -329,7 +339,7 @@ function rebuildFaces(): void {
   clearFaces();
   const sc = props.scenario;
   const room = sc?.room;
-  if (!sc || !scene || room?.type !== 'rect' || !room.size) {
+  if (!sc || !scene || room?.type !== 'rect' || !room.size || props.editorScene) {
     return;
   }
   const { w, h, d } = room.size;
@@ -391,6 +401,256 @@ function hitFace(): string | null {
   // per side) and kept as the fallback for unindexed hits.
   const index = hit.face?.materialIndex ?? (hit.faceIndex !== undefined ? Math.floor(hit.faceIndex / 2) : -1);
   return kBoxFaceKeys[index] ?? null;
+}
+
+// --- room-editor geometry (V0.2) ---
+// Editor Scene entities drawn as pickable meshes when props.editorScene is
+// set (Editor stage). Z-up editor coords are mapped to the Y-up viewport via
+// toThreeCoords. Walls become slabs (baseline + height + thickness); solid
+// boxes / voids are axis-aligned boxes; extrudes are prisms over the XY
+// polygon. Selection is a separate channel (selectEditor) so the Scenario
+// source/receiver/gizmo flow stays untouched.
+const editorGroup: THREE.Group = new THREE.Group();
+let editorMeshes: THREE.Mesh[] = [];
+
+function editorMaterialColor(sceneDoc: EditorScene | null, materialId: string): string {
+  const idx = sceneDoc?.materials.findIndex((m) => m.id === materialId) ?? -1;
+  return kMaterialPalette[idx >= 0 ? idx % kMaterialPalette.length : 0];
+}
+
+function clearEditorGeometry(): void {
+  for (const mesh of editorMeshes) {
+    editorGroup.remove(mesh);
+    mesh.geometry.dispose();
+    const mat = mesh.material as THREE.Material | THREE.Material[];
+    if (Array.isArray(mat)) {
+      mat.forEach((m) => m.dispose());
+    } else {
+      mat.dispose();
+    }
+  }
+  editorMeshes = [];
+}
+
+function pushEditorMesh(mesh: THREE.Mesh, entityId: string, selected: boolean, baseColor: string, opacity: number): void {
+  mesh.userData.avEditorId = entityId;
+  const mat = mesh.material as THREE.MeshBasicMaterial;
+  if (selected) {
+    mat.color.copy(new THREE.Color(baseColor)).lerp(new THREE.Color(0xffffff), 0.35);
+    mat.opacity = Math.min(1, opacity + 0.25);
+  } else {
+    mat.color.set(baseColor);
+    mat.opacity = opacity;
+  }
+  editorGroup.add(mesh);
+  editorMeshes.push(mesh);
+}
+
+/** Wall slab: length along start→end (editor XY), height +Z, thickness to the right. */
+function buildWallMesh(
+  entity: Extract<import('../api/types').EditorEntity, { type: 'wall' }>,
+  selected: boolean,
+): void {
+  const [sx, sy, sz] = entity.start;
+  const [ex, ey] = entity.end;
+  const dx = ex - sx;
+  const dy = ey - sy;
+  const length = Math.hypot(dx, dy);
+  const height = Math.max(entity.height, 1e-4);
+  const thickness = Math.max(entity.thickness, 1e-4);
+  if (length < 1e-6) {
+    return;
+  }
+  const geo = new THREE.BoxGeometry(length, height, thickness);
+  const baseColor = editorMaterialColor(props.editorScene, entity.faces.inner);
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(baseColor),
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  // Editor baseline midpoint → three.js, then up by height/2 from the base z.
+  const midEd: Vec3 = [(sx + ex) / 2, (sy + ey) / 2, sz + height / 2];
+  const [mx, my, mz] = toThreeCoords(midEd);
+  // Thickness extrudes to the right of start→end viewed from +Z (mesher rule);
+  // right = (dy, -dx) in editor XY → same in three.js XZ.
+  const inv = 1 / length;
+  const rightX = dy * inv * (thickness / 2);
+  const rightZ = -dx * inv * (thickness / 2);
+  mesh.position.set(mx + rightX, my, mz + rightZ);
+  // Align local +X with the baseline: rotY θ s.t. (cos θ, 0, −sin θ) ∝ (dx, 0, dy).
+  mesh.rotation.y = Math.atan2(-dy, dx);
+  pushEditorMesh(mesh, entity.id, selected, baseColor, 0.55);
+
+  // Openings: shallow marker boxes sitting in the slab (no jamb geometry).
+  for (const op of entity.openings ?? []) {
+    const opW = Math.max(op.width, 1e-4);
+    const opH = Math.max(op.height, 1e-4);
+    const sill = op.sill ?? 0;
+    const opGeo = new THREE.BoxGeometry(opW, opH, thickness * 1.05);
+    const opMesh = new THREE.Mesh(
+      opGeo,
+      new THREE.MeshBasicMaterial({
+        color: 0x1a1f27,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    // Offset along baseline from `start`, vertical center at sill + height/2.
+    const along = op.offset + opW / 2;
+    const ux = dx * inv;
+    const uy = dy * inv;
+    const baseX = sx + ux * along;
+    const baseY = sy + uy * along;
+    const [ox, oy, oz] = toThreeCoords([baseX, baseY, sz + sill + opH / 2]);
+    opMesh.position.set(ox + rightX, oy, oz + rightZ);
+    opMesh.rotation.y = mesh.rotation.y;
+    opMesh.userData.avEditorId = entity.id;
+    editorGroup.add(opMesh);
+    editorMeshes.push(opMesh);
+  }
+}
+
+function buildBoxMesh(
+  entity: Extract<import('../api/types').EditorEntity, { type: 'solid_box' }>,
+  selected: boolean,
+): void {
+  const [ox, oy, oz] = entity.origin;
+  const [sx, sy, sz] = entity.size;
+  const geo = new THREE.BoxGeometry(
+    Math.max(sx, 1e-4),
+    Math.max(sz, 1e-4),
+    Math.max(sy, 1e-4),
+  );
+  const baseColor = editorMaterialColor(props.editorScene, entity.materialId);
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(baseColor),
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  const [px, py, pz] = toThreeCoords([ox + sx / 2, oy + sy / 2, oz + sz / 2]);
+  mesh.position.set(px, py, pz);
+  pushEditorMesh(mesh, entity.id, selected, baseColor, 0.55);
+}
+
+function buildVoidMesh(
+  entity: Extract<import('../api/types').EditorEntity, { type: 'void' }>,
+  selected: boolean,
+): void {
+  const [ox, oy, oz] = entity.origin;
+  const [sx, sy, sz] = entity.size;
+  const geo = new THREE.BoxGeometry(
+    Math.max(sx, 1e-4),
+    Math.max(sz, 1e-4),
+    Math.max(sy, 1e-4),
+  );
+  const baseColor = '#e05d5d';
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(baseColor),
+      transparent: true,
+      opacity: 0.22,
+      wireframe: true,
+      depthWrite: false,
+    }),
+  );
+  const [px, py, pz] = toThreeCoords([ox + sx / 2, oy + sy / 2, oz + sz / 2]);
+  mesh.position.set(px, py, pz);
+  pushEditorMesh(mesh, entity.id, selected, baseColor, 0.35);
+}
+
+function buildExtrudeMesh(
+  entity: Extract<import('../api/types').EditorEntity, { type: 'solid_extrude' }>,
+  selected: boolean,
+): void {
+  const pts = entity.polygon ?? [];
+  if (pts.length < 3) {
+    return;
+  }
+  // Shape is built in editor XY; extrude along +Z then rotated −90° about X
+  // so +Z becomes +Y (viewport up) and shape-Y maps to world Z.
+  const shape = new THREE.Shape();
+  pts.forEach((p, i) => {
+    if (i === 0) {
+      shape.moveTo(p[0], -p[1]);
+    } else {
+      shape.lineTo(p[0], -p[1]);
+    }
+  });
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: Math.max(entity.height, 1e-4),
+    bevelEnabled: false,
+  });
+  geo.rotateX(-Math.PI / 2);
+  const baseColor = editorMaterialColor(props.editorScene, entity.materialId);
+  const mesh = new THREE.Mesh(
+    geo,
+    new THREE.MeshBasicMaterial({
+      color: new THREE.Color(baseColor),
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  pushEditorMesh(mesh, entity.id, selected, baseColor, 0.55);
+}
+
+function rebuildEditorGeometry(): void {
+  clearEditorGeometry();
+  const doc = props.editorScene;
+  if (!doc || !scene) {
+    return;
+  }
+  if (!editorGroup.parent) {
+    scene.add(editorGroup);
+  }
+  const sel = props.editorSelection ?? '';
+  for (const entity of doc.entities) {
+    const selected = entity.id === sel;
+    switch (entity.type) {
+      case 'wall':
+        buildWallMesh(entity, selected);
+        break;
+      case 'solid_box':
+        buildBoxMesh(entity, selected);
+        break;
+      case 'void':
+        buildVoidMesh(entity, selected);
+        break;
+      case 'solid_extrude':
+        buildExtrudeMesh(entity, selected);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+function hitEditorEntity(): string | null {
+  if (!scene || !camera || editorMeshes.length === 0) {
+    return null;
+  }
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(editorMeshes, false);
+  const hit = hits[0];
+  if (!hit) {
+    return null;
+  }
+  return String(hit.object.userData.avEditorId ?? '') || null;
 }
 
 // Drag state (null = orbit controls own the pointer).
@@ -460,6 +720,9 @@ function applyRoom(): void {
   if (!roomBox) {
     return;
   }
+  // Editor mode owns the viewport: hide the scenario room shell.
+  const editorMode = Boolean(props.editorScene);
+  roomBox.visible = !editorMode;
   const room = props.scenario?.room;
   const size =
     room?.type === 'rect' && room.size
@@ -691,9 +954,15 @@ function onPointerUp(event: PointerEvent): void {
   }
   // Click without drag: face hit selects that face (A2), otherwise the click
   // is empty space and clears the selection (orbit drags are ignored).
+  // Editor geometry has its own channel and wins when the editor is on screen.
   if (!pointerMoved) {
     setPointer(event);
     if (!hitMarker()) {
+      if (props.editorScene) {
+        const editorId = hitEditorEntity();
+        emit('selectEditor', editorId);
+        return;
+      }
       const face = hitFace();
       if (face) {
         emit('select', { entityType: 'face', id: face });
@@ -764,6 +1033,7 @@ onMounted(() => {
   syncMarkers();
   rebuildField();
   rebuildRays();
+  rebuildEditorGeometry();
 
   const canvas = renderer.domElement;
   canvas.addEventListener('pointerdown', onPointerDown);
@@ -787,6 +1057,18 @@ onMounted(() => {
       syncGizmo();
       syncFaceHighlight();
     },
+  );
+  watch(
+    () => props.editorScene,
+    () => {
+      applyRoom();
+      rebuildEditorGeometry();
+    },
+    { deep: true },
+  );
+  watch(
+    () => props.editorSelection,
+    () => rebuildEditorGeometry(),
   );
   watch(snapEnabled, () => applySnapSetting());
   watch(
@@ -818,6 +1100,10 @@ onBeforeUnmount(() => {
   clearField();
   clearRays();
   clearFaces();
+  clearEditorGeometry();
+  if (editorGroup.parent) {
+    editorGroup.parent.remove(editorGroup);
+  }
   if (transformControls) {
     transformControls.detach();
     if (scene) {
